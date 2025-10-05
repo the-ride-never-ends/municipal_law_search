@@ -41,13 +41,13 @@ from logger import logger as module_logger
 
 import paths.search as search
 import paths.search_history as search_history
-from app.paths.upload_document import make_upload_document
+from paths.upload_document import make_upload_document
 from schemas import LawItem
 from schemas import ErrorResponse
 
 from utils import get_html_db
-from llm import AsyncLLMInterface, LLM
-from app.read_only_database import Database, READ_ONLY_DB
+from llm import AsyncLLMInterface, get_llm
+from read_only_database import Database, READ_ONLY_DB
 
 # Load environment variables
 load_dotenv()
@@ -937,7 +937,7 @@ def get_upload_menu(mock_resources: Optional[dict] = None, mock_configs: Optiona
     _resources = mock_resources or {}
     resources = {
         "read_only_db": _resources.pop('read_only_db', READ_ONLY_DB),
-        "llm": _resources.pop("llm", LLM),
+        "llm": _resources.pop("llm", get_llm()),
         "logger": _resources.pop("logger", module_logger),
         "fastapi": _resources.pop("fastapi", FastAPI),
         "email": _resources.pop("email", email),
@@ -951,7 +951,7 @@ def get_side_menu(mock_resources: Optional[dict] = None, mock_configs: Optional[
     _resources = mock_resources or {}
     resources = {
         "read_only_db": _resources.pop('read_only_db', READ_ONLY_DB),
-        "llm": _resources.pop("llm", LLM),
+        "llm": _resources.pop("llm", get_llm()),
         "logger": _resources.pop("logger", module_logger),
         "fastapi": _resources.pop("fastapi", FastAPI),
         "email": _resources.pop("email", email),
@@ -1024,7 +1024,7 @@ def make_app(
 
     resources = {
         "read_only_db": _resources.pop('read_only_db', READ_ONLY_DB),
-        "llm": _resources.pop("llm", LLM),
+        "llm": _resources.pop("llm", get_llm()),
         "logger": _resources.pop("logger", module_logger),
         "fastapi": _resources.pop("fastapi", FastAPI),
         "Jinja2Templates": _resources.pop("Jinja2Templates", Jinja2Templates),

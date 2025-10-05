@@ -1,3 +1,4 @@
+*
 import os
 from pathlib import Path
 import sys
@@ -5,8 +6,12 @@ from typing import Any, Literal, Optional
 import logging
 from unittest.mock import MagicMock, AsyncMock
 
+try:
+    import torch
+    TORCH_AVAILABLE = True
+except ImportError:
+    TORCH_AVAILABLE = False
 
-import torch
 from pydantic import (
     BaseModel, 
     computed_field, 
@@ -36,6 +41,8 @@ def _USE_GPU_FOR_COSINE_SIMILARITY() -> str:
     Returns:
         str: "cuda" if GPU is available, "cpu" otherwise.
     """
+    if not TORCH_AVAILABLE:
+        return "cpu"
     return "cuda" if torch.cuda.is_available() else "cpu"
 
 
@@ -87,8 +94,11 @@ class Configs(BaseModel):
         TOP_K (int): Number of top results to return in searches.
         USE_GPU_FOR_COSINE_SIMILARITY (str): Computed property, "cuda" or "cpu".
     """
-    OPENAI_API_KEY:                   SecretStr = os.environ.get("OPENAI_API_KEY")
-    HUGGING_FACE_USER_ACCESS_TOKEN:   SecretStr = None
+    
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
+    
+    OPENAI_API_KEY:                   SecretStr = Field(default_factory=lambda: os.environ.get("OPENAI_API_KEY"))
+    HUGGING_FACE_USER_ACCESS_TOKEN:   SecretStr = Field(default_factory=lambda: os.environ.get("HUGGING_FACE_USER_ACCESS_TOKEN"))
     ADMIN_EMAIL:                      SecretStr = None
     EMAIL_SERVER:                     SecretStr = "smtp.gmail.com"
     EMAIL_USERNAME:                   SecretStr = None

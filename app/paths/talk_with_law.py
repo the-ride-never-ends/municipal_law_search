@@ -8,7 +8,7 @@ from typing import Callable
 from configs import configs, Configs
 
 
-from llm import LLM
+from llm import get_llm
 from api_.llm_.async_interface import AsyncLLMInterface
 
 
@@ -38,10 +38,10 @@ class TalkWithLawFunction:
         self.resources = resources
 
         self.db_path: Path = Path(db_path)
-        self.llm: AsyncLLMInterface = self.resources['LLM']
+        self.llm: AsyncLLMInterface = self.resources['get_llm']()
 
 resources = {
-    'LLM': LLM,
+    'get_llm': get_llm,
 }
 
 async def function():

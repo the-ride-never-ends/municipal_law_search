@@ -1,6 +1,10 @@
 import numpy as np
-import torch
 
+try:
+    import torch
+    TORCH_AVAILABLE = True
+except ImportError:
+    TORCH_AVAILABLE = False
 
 from logger import logger 
 from configs import configs
@@ -74,7 +78,7 @@ def cosine_similarity(x: list[float], y: list[float]) -> np.float64:
             - 0 indicates orthogonal (e.g. perpendicular) vectors
             - -1 indicates opposite vectors.
     """
-    if configs.USE_GPU_FOR_COSINE_SIMILARITY == "cuda":
+    if TORCH_AVAILABLE and configs.USE_GPU_FOR_COSINE_SIMILARITY == "cuda":
         return _torch_cosine_similarity(x, y)
     else:
         return _numpy_cosine_similarity(x, y)

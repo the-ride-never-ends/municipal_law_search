@@ -28,8 +28,8 @@ from pathlib import Path
 from pydantic import BaseModel
 
 
-from app.utils.common.get_cid import get_cid
-from app.configs import Configs
+from utils.common.get_cid import get_cid
+from configs import Configs
 
 
 CID_PATTERN = re.compile(r'^bafkreiht[a-z0-9]{52}$')
@@ -352,8 +352,8 @@ class UploadDocument:
 
 def make_upload_document():
     """Factory function to create UploadDocument instance with default resources and configs."""
-    from app.configs import configs
-    from app.logger import logger
+    from configs import configs
+    from logger import logger
 
     resources = {
         "logger": logger,

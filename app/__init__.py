@@ -4,7 +4,7 @@ sys.path.append("..")  # Add the parent directory to the path
 
 from .configs import Configs, configs, CONFIGS
 from logger import logger
-from llm import LLM
+from llm import get_llm
 import utils
 import paths
 import api_
@@ -14,7 +14,7 @@ __all__ = [
     "configs",
     "Configs",
     "logger",
-    "LLM",
+    "get_llm",
     "CONFIGS",
     "utils",
     "paths",

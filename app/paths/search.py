@@ -23,7 +23,7 @@ from logger import logger as  module_logger
 from configs import configs, Configs
 
 
-from llm import LLM, AsyncLLMInterface
+from llm import get_llm, AsyncLLMInterface
 from schemas.search_response import SearchResponse
 from utils.app.search.format_initial_sql_return_from_search import format_initial_sql_return_from_search
 from utils.app.search.get_embedding_and_calculate_cosine_similarity import (
@@ -115,7 +115,7 @@ class SearchFunction:
         self.configs = configs
 
         self.search_query: str = search_query.lower()
-        self.llm: AsyncLLMInterface = self.resources['LLM']
+        self.llm: AsyncLLMInterface = self.resources['get_llm']()
         self.logger: logging.Logger = self.resources['logger']
 
         if not self.search_query:
@@ -654,7 +654,7 @@ resources = {
     'async_run_in_process_pool': async_run_in_process_pool,
     'close_database_connection': close_database_connection,
     'close_database_cursor': close_database_cursor,
-    'determine_user_intent': LLM.determine_user_intent,
+    'determine_user_intent': lambda query: get_llm().determine_user_intent(query),
     'estimate_the_total_count_without_pagination': estimate_the_total_count_without_pagination,
     'format_initial_sql_return_from_search': format_initial_sql_return_from_search,
     'get_a_database_connection': get_a_database_connection,
@@ -665,8 +665,8 @@ resources = {
     'get_embedding_and_calculate_cosine_similarity': get_embedding_and_calculate_cosine_similarity,
     'get_embedding_cids': get_embedding_cids,
     'get_html_for_this_citation': get_html_for_this_citation,
-    'get_single_embedding': LLM.get_single_embedding,
-    'LLM': LLM,
+    'get_single_embedding': lambda text: get_llm().get_single_embedding(text),
+    'get_llm': get_llm,
     'LLMSqlOutput': LLMSqlOutput,
     'make_search_query_table_if_it_doesnt_exist': make_search_query_table_if_it_doesnt_exist,
     'sort_and_save_search_query_results': sort_and_save_search_query_results,
@@ -716,7 +716,7 @@ async def function(
     per_page: int = Query(20, description="Items per page"),
     client_id: str = None,
     logger: logging.Logger = module_logger,
-    llm: AsyncLLMInterface = LLM,
+    llm: AsyncLLMInterface = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """
     API endpoint for searching the American law database using natural language.
@@ -754,7 +754,7 @@ async def function(
         ```
     """
     resources['logger'] = logger
-    resources['LLM'] = llm
+    resources['get_llm'] = get_llm if llm is None else lambda: llm
     async with SearchFunction(search_query=q, resources=resources, configs=configs) as search_func:
         async for result in search_func.search(page=page, per_page=per_page, client_id=client_id):
             yield result
