@@ -284,25 +284,25 @@ def mock_app_instance():
 
 
 @pytest.fixture
-def mock_configs():
+def configs():
     """
     Mock configuration object.
     
     Returns:
         Mock: Configuration object mock
     """
-    raise NotImplementedError("mock_configs fixture needs to be implemented")
+    raise NotImplementedError("configs fixture needs to be implemented")
 
 
 @pytest.fixture
-def mock_resources():
+def resources():
     """
     Mock resources dictionary.
     
     Returns:
         Dict[str, Mock]: Mock resources dictionary
     """
-    raise NotImplementedError("mock_resources fixture needs to be implemented")
+    raise NotImplementedError("resources fixture needs to be implemented")
 
 
 # ============================================================================

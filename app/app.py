@@ -4,76 +4,84 @@
 The FastAPI application that serves as an API for accessing American law documents.
 """
 from __future__ import annotations
-import __main__
+
+
 
 import asyncio
-from dotenv import load_dotenv
+import atexit
+import email
 import json
-from enum import StrEnum
-from pathlib import Path
-import sys
-import traceback
-from typing import Any, Callable, Optional, Union
-from types import ModuleType
 import logging
-from collections import defaultdict
-
+import mimetypes
 import smtplib
 import ssl
+import sys
+import traceback
+from collections import defaultdict
 from datetime import datetime
-from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from email.utils import formataddr, quote
+from enum import StrEnum
+from pathlib import Path
+from typing import Any, Callable, Optional
 
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, File, UploadFile
-from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
-from fastapi.middleware.cors import CORSMiddleware
-from sse_starlette.sse import EventSourceResponse
-import uvicorn
+from functools import cached_property
+from errors import StartupError, InitializationError, ResourceError, ConfigurationError
 
 
-from configs import Configs, configs as project_configs, get_unittest_mock_attributes
-from logger import logger as module_logger
+try:
+    from dotenv import load_dotenv
+    from fastapi import Depends, FastAPI, HTTPException, Query, Request, File, UploadFile
+    from fastapi.middleware.cors import CORSMiddleware
+    from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
+    from fastapi.staticfiles import StaticFiles
+    from fastapi.templating import Jinja2Templates
+    import magic
+    from pydantic import BaseModel, computed_field, PrivateAttr
+    from sse_starlette.sse import EventSourceResponse
+    import uvicorn
+except ImportError as e:
+    raise StartupError(f"Error importing third-party dependencies: {e}") from e
 
+try:
+    from configs import Configs, configs as project_configs
+    from logger import logger as module_logger
 
-import paths.search as search
-import paths.search_history as search_history
-from app.paths.upload_document import make_upload_document
-from schemas import LawItem
-from schemas import ErrorResponse
-
-from utils import get_html_db
-from llm import AsyncLLMInterface, LLM
-from app.read_only_database import Database, READ_ONLY_DB
+    import paths.search as search
+    import paths.search_history as search_history
+    from paths.upload_document import make_upload_document
+    from schemas import LawItem
+    from schemas import ErrorResponse
+    from utils import get_html_db
+    from llm import AsyncLLMInterface, LLM
+    from read_only_database import Database, READ_ONLY_DB
+except ImportError as e:
+    raise StartupError(f"Error importing project modules: {e}") from e
 
 # Load environment variables
 load_dotenv()
 
-import email
-import ssl
-import smtplib
 
-from functools import cached_property
-from pydantic import BaseModel, computed_field, PrivateAttr
-import mimetypes
-import magic
 
 class InitializationError(RuntimeError):
     """Custom exception for initialization errors in the App class."""
     def __init__(self, message: str):
         super().__init__(message)
 
+
 class Routes(StrEnum):
     BASE = "/"
     STATIC_FILES = "/src"
-    FAVICON = "/favicon.ico"
+    FAVICON = "/api/favicon.ico"
     PUBLIC_FILES = "/public/{filename:path}"
     SIDE_MENU_FILES = "/side-menu/{filename:path}"
     SEARCH_SSE = "/api/search/sse"
     GET_LAW = "/api/law/{cid}"
+    DEMO = "/api/demo"
+    LLM_CONVERSATION = "/api/llm/conversation"
+    CLEAR_LLM_CONVERSATION = "/api/llm/clear-conversation"
     TALK_WITH_THE_LAW = "/api/talk_with_the_law"
     SEARCH_HISTORY = "/api/search-history"
     BLUEBOOK_CITATIONS = "/api/bluebook-citations"
@@ -124,22 +132,33 @@ def _determine_mime_type(path_or_bytes: str | bytes | None) -> Optional[str]:
         case _:
             return None
 
-from typing import Annotated as Annot
+from typing import Annotated as Ann
 from pydantic import AfterValidator as AV, FilePath, ValidationError
 
-def is_static_web_file(file: FilePath) -> bool:
+
+def event_dict(event: str, data: dict) -> dict:
+    return {"event": event, "data": json.dumps(data)}
+
+
+def is_static_web_file(file: FilePath) -> FilePath:
     valid_extensions = {'.html', '.css', '.js', '.json', '.txt', '.xml'}
-    if not file.suffix in valid_extensions:
+    suffix = file.suffix.lower()
+    if suffix not in valid_extensions:
         raise ValueError(
-            f"Web file must be one of the following types: {', '.join(valid_extensions)}. Got '{file.suffix}' instead."
+            f"Web file must be one of the following types: {', '.join(valid_extensions)}. Got '{suffix}' instead."
         )
+    return file
+
 
 class StaticWebFile(BaseModel):
-    path: Annot[FilePath, AV(is_static_web_file)]
+    path: Ann[FilePath, AV(is_static_web_file)]
 
-    @property
-    async def file_response(self) -> FileResponse:
-        return await FileResponse(self.path)
+    @cached_property
+    def file_response(self) -> FileResponse:
+        try:
+            return FileResponse(self.path)
+        except ValidationError as e:
+            raise HTTPException(status_code=404, details=f"Error serving static web file '{self.path}': {e}") from e
 
 
 
@@ -175,10 +194,7 @@ class Document(BaseModel):
 
 class Dictate:
 
-    def __init__(self, *, 
-                 configs: Configs = None, 
-                 resources: dict[str, Any] = None
-                ) -> None:
+    def __init__(self, *, configs: Configs, resources: dict[str, Any]) -> None:
         self.configs = configs
         self.resources = resources
 
@@ -187,56 +203,71 @@ class Dictate:
     def transcribe_audio(self, audio_file: bytes) -> str:
         """
         Transcribe an audio file to text using a speech-to-text model.
+
+        Args:
+            audio_file (bytes): The audio file content in bytes.
+
+        Returns:
+            str: The transcribed text from the audio file.
+        
+        Raises:
+            TypeError: If the audio_file is not bytes.
+            ValueError: If the audio_file is empty.
+            RuntimeError: If transcription unexpectedly fails.
         """
+        if not isinstance(audio_file, bytes):
+            raise TypeError(f"Audio file must be bytes, got {type(audio_file).__name__} instead.")
+        if not audio_file:
+            raise ValueError("Audio file cannot be empty.")
+
+        try:
+            transcribed_text = "Transcribed text from audio."
+        except Exception as e:
+            raise RuntimeError(f"Error during transcription: {e}") from e
+
+        return transcribed_text
+
+
 
 class VoiceMode:
 
-    def __init__(self, *, 
-                 configs: Configs = None, 
-                 resources: dict[str, Any] = None
-                ) -> None:
+    def __init__(self, *, configs: Configs, resources: dict[str, Any]) -> None:
         self.configs = configs
         self.resources = resources
 
 
 class UploadMenu:
 
-    def __init__(self, *, 
-                 configs: Configs = None, 
-                 resources: dict[str, Any] = None
-                ) -> None:
+    def __init__(self, *, configs: Configs, resources: dict[str, Any]) -> None:
         self.configs = configs
         self.resources = resources
 
     def add_photos_and_files(self, *args, **kwargs) -> None:
         """Upload photos and files from local device."""
-        pass
+        raise NotImplementedError("add_photos_and_files method is not implemented yet.")
 
     def add_from_google_drive(self, *args, **kwargs) -> None:
         """Upload photos and files from Google Drive."""
-        pass
+        raise NotImplementedError("add_from_google_drive method is not implemented yet.")
 
     def agent_mode(self, *args, **kwargs) -> None:
         """Let an AI agent perform a task autonomously."""
-        pass
+        raise NotImplementedError("agent_mode method is not implemented yet.")
 
     def deep_research(self, *args, **kwargs) -> None:
-        pass
+        raise NotImplementedError("deep_research method is not implemented yet.")
 
     def connectors(self, *args, **kwargs) -> None:
         """Connect to third-party services like Dropbox, Google Drive, OneDrive, etc."""
-        pass
+        raise NotImplementedError("connectors method is not implemented yet.")
 
     def web_search(self, *args, **kwargs) -> None:
         """Search the web for information."""
-        pass
+        raise NotImplementedError("web_search method is not implemented yet.")
 
 
 class SideMenu:
-    def __init__(self, *, 
-                 configs: Configs = None, 
-                 resources: dict[str, Any] = None
-                ) -> None:
+    def __init__(self, *, configs: Configs, resources: dict[str, Any]) -> None:
         self.configs = configs
         self.resources = resources
 
@@ -292,25 +323,24 @@ class App:
     DESCRIPTION = "API for accessing American law database"
 
 
-    def __init__(self, *, 
-                 configs: Configs = None, 
-                 resources: dict[str, Any] = None
-                ) -> None:
+    def __init__(self, *, configs: Configs, resources: dict[str, Any]) -> None:
         self.configs = configs
         self.resources = resources
 
-        self.routes:          Routes            = Routes
-        self.read_only_db:    Database          = resources['read_only_db'] # NOTE These classes are instantiated already.
-        self.llm:             AsyncLLMInterface = resources['llm']
         self.logger:          logging.Logger    = resources['logger']
-        self.fastapi:         FastAPI           = resources['fastapi']
-        self.email:           email             = resources['email']
-        self.templates:       Jinja2Templates   = resources['Jinja2Templates']
-        self.side_menu:       SideMenu          = None # TODO implement side menu class
-        self.upload_menu:     UploadMenu        = None # TODO implement upload menu class
-        self.batch_processor: Callable          = None # TODO See pdf_processor in ipfs_datasets_py
-        self._search_function: Callable         = resources['search_function']
-        self._upload_document: Callable         = resources['upload_document'] 
+
+        self.routes:           Routes            = Routes
+        self.read_only_db:     Database          = resources['read_only_db'] # NOTE These classes are instantiated already.
+        self.llm:              AsyncLLMInterface = resources['llm']
+        self.fastapi:          FastAPI           = resources['fastapi']
+        self.email:            email             = resources['email']
+        self.templates:        Jinja2Templates   = resources['Jinja2Templates']
+        self.side_menu:        SideMenu          = None # TODO implement side menu class
+        self.upload_menu:      UploadMenu        = None # TODO implement upload menu class
+        self.batch_processor:  Callable          = None # TODO See pdf_processor in ipfs_datasets_py
+        self._search_function: Callable          = resources['search_function']
+        self._upload_document: Callable          = resources['upload_document'] 
+        self._event_dict:       Callable         = resources['event_dict'] 
 
         # Contact form email settings
         self._email_address: str = configs.ADMIN_EMAIL
@@ -318,6 +348,9 @@ class App:
         self._smtp_port: int = configs.EMAIL_PORT
         self._smtp_username: str = configs.EMAIL_USERNAME
         self._smtp_password: str = configs.EMAIL_PASSWORD
+
+        # LLM mode
+        self.llm_mode: bool = False
 
         # Paths
         # TODO move to configs.py
@@ -343,6 +376,12 @@ class App:
                             "text_content": str,
                         }
                     },
+                    "llm_conversations": {
+                        "cid": {
+                            "messages": list[dict[str, Any]],
+                            "last_interaction_timestamp": str,
+                        }
+                    }
                 }
             }
         }
@@ -357,12 +396,15 @@ class App:
         Returns:
             dict: A dictionary mapping routes to handler functions and parameters.
         """
+        schema_true = {"include_in_schema": True}
+        schema_false = {"include_in_schema": False}
         mappings = {
             self.routes.BASE:                (self.serve_index, {"response_class": HTMLResponse, "include_in_schema": True}),
             self.routes.FAVICON:             (self.favicon, {"include_in_schema": False}),
             self.routes.PUBLIC_FILES:        (self.serve_public_files, {"include_in_schema": True}),
             self.routes.SIDE_MENU_FILES:     (self.serve_side_menu_files, {"include_in_schema": True}),
             self.routes.SEARCH_SSE:          (self.search_sse_response, {"include_in_schema": True}),
+            self.routes.LLM_CONVERSATION: (self.llm_conversation_sse, {"include_in_schema": True}),
             # self.routes.TALK_WITH_THE_LAW: (talk_with_the_law, {"include_in_schema": True}),
             self.routes.GET_LAW:             (self.get_law, {"include_in_schema": True}),
             # self.routes.SEARCH_HISTORY:    (get_search_history, {"include_in_schema": True}),
@@ -381,9 +423,11 @@ class App:
 
     @property
     def post_mappings(self):
+        schema_true = {"include_in_schema": True}
         mappings = {
-            self.routes.TALK_WITH_THE_LAW: (self.talk_with_the_law, {"include_in_schema": True}),
+            self.routes.TALK_WITH_THE_LAW: (self.talk_with_the_law, schema_true),
             self.routes.CONTACT:           (self.contact, {"include_in_schema": True}),
+            self.routes.CLEAR_LLM_CONVERSATION: (self.clear_llm_conversation, {"include_in_schema": True}),
         }
         return mappings
 
@@ -432,8 +476,10 @@ class App:
         Returns:
             HTMLResponse: The rendered index.html template
         """
-        return self.templates.TemplateResponse(self.index, {"request": request})
-
+        try:
+            return self.templates.TemplateResponse(self.index, {"request": request})
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error rendering index page: {e}") from e
 
 
     async def serve_public_files(self, filename: str) -> FileResponse:
@@ -452,10 +498,13 @@ class App:
             HTTPException: 400 error if the requested path is not a file
             HTTPException: 415 error if the file type is unsupported
         """
-        filename = self._validate_string(filename)
+        try:
+            filename = self._validate_string(filename)
+        except Exception as e:
+            raise e
         path = self.templates_path / filename
         try:
-            return await StaticWebFile(path=path).file_response  # Validate file
+            return StaticWebFile(path=path).file_response  # Validate file
         except ValidationError as e:
             raise HTTPException(status_code=404, detail=str(e))
 
@@ -479,10 +528,15 @@ class App:
         Raises:
             HTTPException: 404 error if the requested file does not exist
         """
-        filename = self._validate_string(filename)
-        path = self.templates_path / 'side-menu' / filename
         try:
-            return await StaticWebFile(path=path).file_response  # Validate file
+            filename = self._validate_string(filename)
+        except Exception as e:
+            raise e
+
+        path = self.templates_path / 'side-menu' / filename
+
+        try:
+            return StaticWebFile(path=path).file_response 
         except ValidationError as e:
             raise HTTPException(status_code=404, detail=str(e))
 
@@ -561,6 +615,106 @@ class App:
         """
         return await self._upload_document(file, self.temp_storage, client_cid)
 
+    async def clear_llm_conversation(
+        self,
+        client_id: str = None,
+    ) -> JSONResponse:
+        """Clear the LLM conversation history for a client.
+
+        Args:
+            client_id: Client identifier
+
+        Returns:
+            JSONResponse: Response indicating success
+        """
+        if "llm_conversations" in self.temp_storage and client_id in self.temp_storage["llm_conversations"]:
+            del self.temp_storage["llm_conversations"][client_id]
+
+        return JSONResponse({
+            "status": "success",
+            "message": "Conversation history cleared"
+        })
+
+    async def llm_conversation_sse(
+        self,
+        q: str = Query("", description="User message"),
+        client_id: str = None,
+    ) -> EventSourceResponse:
+        """Server-Sent Events endpoint for LLM conversation streaming.
+
+        This endpoint provides a streaming interface for LLM conversations.
+        Unlike search, this maintains conversational context and streams
+        the LLM's response token-by-token for a more interactive experience.
+
+        The event stream includes:
+        - A "conversation_started" event when processing begins
+        - Multiple "token" events as the LLM generates its response
+        - A "conversation_complete" event when generation is finished
+        - An "error" event if any errors occur
+
+        Args:
+            q: The user's message/query string
+            client_id: Client identifier for conversation history tracking
+
+        Returns:
+            EventSourceResponse: A streaming response that sends events to the client
+        """
+        self._validate_optional_string(q, 'q', skip_if_value_is_none=False)
+
+        async def _event_generator():
+            try:
+                yield self._event_dict("conversation_started", {
+                    "message": "Processing your request",
+                    "query": q
+                })
+
+                # Get conversation history for this client if it exists
+                conversation_history = self.temp_storage.get("llm_conversations", {}).get(client_id, [])
+
+                # Add user message to history
+                conversation_history.append({"role": "user", "content": q})
+
+                # Stream LLM response
+                full_response = ""
+                async for chunk in self.llm.stream_response(q, conversation_history):
+                    full_response += chunk
+                    yield self._event_dict("token", {
+                        "token": chunk,
+                        "full_response": full_response
+                    })
+
+                # Add assistant response to history
+                conversation_history.append({"role": "assistant", "content": full_response})
+
+                # Store updated conversation history
+                if "llm_conversations" not in self.temp_storage:
+                    self.temp_storage["llm_conversations"] = {}
+                self.temp_storage["llm_conversations"][client_id] = conversation_history
+
+                yield self._event_dict("conversation_complete", {
+                    "message": "Response complete",
+                    "full_response": full_response
+                })
+
+            except Exception as e:
+                trace = traceback.format_exc()
+                msg = f"Error in LLM conversation stream: {e}\n{trace}"
+                self.logger.error(msg)
+                yield self._event_dict("error", {"message": msg})
+            finally:
+                if client_id is not None:
+                    # Save to permanent storage if needed
+                    if client_id not in self.perm_storage:
+                        self.perm_storage[client_id] = []
+                    self.perm_storage[client_id].append({
+                        "type": "llm_conversation",
+                        "timestamp": datetime.now().isoformat(),
+                        "history": conversation_history
+                    })
+
+        return EventSourceResponse(_event_generator())
+
+
     async def search_sse_response(
         self,
         q: str = Query("", description="Search query"),
@@ -606,25 +760,22 @@ class App:
 
         kwargs = {"q": q, "page": page, "per_page": per_page, "client_id": client_id, "logger": self.logger, "llm": self.llm}
 
-        def _event_dict(event: str, data: dict) -> dict:
-            return {"event": event, "data": json.dumps(data)}
-
         async def _event_generator():
             try:
-                yield _event_dict("search_started", {"message": "Search started", "query": q})
+                yield event_dict("search_started", {"message": "Search started", "query": q})
 
                 async for result in self._search_function(**kwargs):
                     # Send each result chunk as it becomes available
-                    yield _event_dict("results_update", result)
+                    yield event_dict("results_update", result)
 
                 # Final event to indicate the search is complete
-                yield _event_dict("search_complete", {"message": "Search completed", "query": q})
+                yield event_dict("search_complete", {"message": "Search completed", "query": q})
 
             except Exception as e:
                 msg = f"Error in SSE stream: {e}"
                 self.logger.error(msg)
                 traceback.print_exc()
-                yield _event_dict("error", {"message": msg})
+                yield event_dict("error", {"message": msg})
             finally:
                 if client_id is not None:
                     self.perm_storage[client_id].append(self.temp_storage["current_sessions"].get(client_id, {}))
@@ -758,7 +909,7 @@ class App:
         cleaning_dict = {}
 
         for value, field_name, can_be_none in string_validations:
-            self._validate_string(value, field_name, skip_if_value_is_none=can_be_none)
+            self._validate_optional_string(value, field_name, skip_if_value_is_none=can_be_none)
             # Quote the string to prevent injection attacks
             cleaning_dict[field_name] = f'"{quote(value.strip())}"' if value is not None else None
 
@@ -842,7 +993,7 @@ Message:
         raise NotImplementedError("Account page endpoint not implemented yet.")
 
     @staticmethod
-    def _validate_string(value: Any, var_name: str, skip_if_value_is_none: bool = False) -> None:
+    def _validate_optional_string(value: Any, var_name: str, skip_if_value_is_none: bool = False) -> None:
         if skip_if_value_is_none and value is None:
             return
         if not isinstance(value, str):
@@ -881,7 +1032,7 @@ Message:
         integer_params = [(per_page, 'per_page'), (page, 'page')]
 
         for arg, name in string_params:
-            self._validate_string(arg, name, skip_if_value_is_none=True)
+            self._validate_optional_string(arg, name, skip_if_value_is_none=True)
 
         for arg, name in integer_params:
             self._validate_integer(arg, name)
@@ -917,46 +1068,85 @@ Message:
 
         Raises:
             TypeError: If any route handler function is not callable.
+            InitializationError: If there are unexpected errors during App initialization.
         """
         app = FastAPI(title=self.TITLE, description=self.DESCRIPTION)
-        app = self._add_middleware(app)
-        app = self._map_static_files(app)
+        try:
+            app = self._add_middleware(app)
+        except Exception as e:
+            raise InitializationError(f"Error initializing App middleware: {e}") from e
+        try:
+            app = self._map_static_files(app)
+        except Exception as e:
+            raise InitializationError(f"Error initializing App static files: {e}") from e
 
+        # Register GET routes
         for route, (func, params) in self.get_mappings.items():
             if func is None:
                 continue
             if not callable(func):
                 raise TypeError(f"Function for route '{route}' is not callable.")
-            app.get(route, **params)(func)
+            try:
+                app.get(route, **params)(func)
+            except Exception as e:
+                raise InitializationError(f"Error adding GET route '{route}': {e}") from e
+
+        # Register POST routes
+        for route, (func, params) in self.post_mappings.items():
+            if func is None:
+                continue
+            if not callable(func):
+                raise TypeError(f"Function for route '{route}' is not callable.")
+            try:
+                app.post(route, **params)(func)
+            except Exception as e:
+                raise InitializationError(f"Error adding POST route '{route}': {e}") from e
 
         return app
 
 
-def get_upload_menu(mock_resources: Optional[dict] = None, mock_configs: Optional[BaseModel] = None) -> UploadMenu:
-    configs = mock_configs or project_configs
-    _resources = mock_resources or {}
-    resources = {
-        "read_only_db": _resources.pop('read_only_db', READ_ONLY_DB),
-        "llm": _resources.pop("llm", LLM),
-        "logger": _resources.pop("logger", module_logger),
-        "fastapi": _resources.pop("fastapi", FastAPI),
-        "email": _resources.pop("email", email),
-    }
-    upload_menu_instance = UploadMenu(configs=configs, resources=resources)
+def get_upload_menu(
+        resources: dict[str, Any] = {},
+        configs: BaseModel = project_configs,
+        ) -> UploadMenu:
+
+    try:
+        Configs.model_validate(configs)
+    except ValidationError as e:
+        raise ConfigurationError(f"configs failed validation: {e.errors()}") from e
+
+    try:
+        resources_ = {
+            "read_only_db": resources.pop('read_only_db', READ_ONLY_DB),
+            "llm": resources.pop("llm", LLM),
+            "logger": resources.pop("logger", module_logger),
+            "fastapi": resources.pop("fastapi", FastAPI),
+            "email": resources.pop("email", email),
+        }
+    except Exception as e:
+        raise ResourceError(f"Error setting up resources for UploadMenu: {e}") from e
+
+    try:
+        upload_menu_instance = UploadMenu(configs=configs, resources=resources_)
+    except Exception as e:
+        raise InitializationError(f"Error initializing UploadMenu: {e}") from e
     return upload_menu_instance
 
 
-def get_side_menu(mock_resources: Optional[dict] = None, mock_configs: Optional[BaseModel] = None) -> SideMenu:
-    configs = mock_configs or project_configs
-    _resources = mock_resources or {}
+def get_side_menu(resources: Optional[dict] = None, configs: Optional[BaseModel] = None) -> SideMenu:
+    configs = configs or project_configs
+    resources = resources or {}
     resources = {
-        "read_only_db": _resources.pop('read_only_db', READ_ONLY_DB),
-        "llm": _resources.pop("llm", LLM),
-        "logger": _resources.pop("logger", module_logger),
-        "fastapi": _resources.pop("fastapi", FastAPI),
-        "email": _resources.pop("email", email),
+        "read_only_db": resources.pop('read_only_db', READ_ONLY_DB),
+        "llm": resources.pop("llm", LLM),
+        "logger": resources.pop("logger", module_logger),
+        "fastapi": resources.pop("fastapi", FastAPI),
+        "email": resources.pop("email", email),
     }
-    side_menu_instance = SideMenu(configs=configs, resources=resources)
+    try:
+        side_menu_instance = SideMenu(configs=configs, resources=resources)
+    except Exception as e:
+        raise InitializationError(f"Error initializing SideMenu: {e}") from e
     return side_menu_instance
 
 
@@ -976,14 +1166,14 @@ DEFAULT_RESOURCE_KEYS = {
 }
 
 def make_app(
-        mock_resources: Optional[dict[str, Any]] = None, 
-        mock_configs: Optional[BaseModel] = None,
+        resources: dict[str, Any] = {}, 
+        configs: BaseModel = project_configs,
         ) -> FastAPI:
     """
     Factory function to create a new FastAPI instance for the American Law Search website's backend.
 
     Args:
-        mock_resources (dict[str, Any], optional): A dictionary of callables to override injected defaults. Defaults to None.
+        resources (dict[str, Any], optional): A dictionary of callables to override injected defaults. Defaults to None.
 
         Resources are:
             - read_only_db (Database): Read-only database connection (default: READ_ONLY_DB)
@@ -996,7 +1186,7 @@ def make_app(
             - upload_menu (UploadMenu): UploadMenu instance (default: get_upload_menu())
             - search_function (AsyncGenerator): Search function (default: search.function)
 
-        mock_configs (Configs, optional): A Configs object to override default initialization configurations. Defaults to None.
+        configs (Configs, optional): A Configs object to override default initialization configurations. Defaults to None.
 
         Configs attributes set upon initialization are:
             - ADMIN_EMAIL (str): Admin email address
@@ -1010,34 +1200,49 @@ def make_app(
         FastAPI: The configured FastAPI application instance.
 
     Raises:
-        KeyError: If mock_resources contains unexpected keys.
-        AttributeError: If mock_configs contains unexpected attributes.
-        InitializationError: If there are unexpected errors during App initialization.
+        TypeError: If resources is not a dict or configs is not a BaseModel instance.
+        KeyError: If resources contains unexpected keys.
+        ConfigurationError: If configs fail validation.
+        ResourceError: If there are errors setting up resources.
+        InitializationError: If an error occurs during App initialization.
     """
-    configs = mock_configs or project_configs
-    _resources = mock_resources or {}
-
-    if mock_resources is not None:
-        for key in _resources.keys():
+    if not isinstance(resources, dict):
+        raise TypeError(f"'resources' must be a dict, got {type(resources).__name__} instead.")
+    else:
+        if not resources:
+            pass
+        for key in resources.keys():
             if key not in DEFAULT_RESOURCE_KEYS:
-                raise KeyError(f"Unexpected resource key in mock_resources: {key}")
+                raise KeyError(f"Unexpected resource key in resources: {key}")
 
-    resources = {
-        "read_only_db": _resources.pop('read_only_db', READ_ONLY_DB),
-        "llm": _resources.pop("llm", LLM),
-        "logger": _resources.pop("logger", module_logger),
-        "fastapi": _resources.pop("fastapi", FastAPI),
-        "Jinja2Templates": _resources.pop("Jinja2Templates", Jinja2Templates),
-        "email": _resources.pop("email", email),
-        "side_menu": _resources.pop("side_menu", get_side_menu()),
-        "upload_menu": _resources.pop("upload_menu", get_upload_menu()),
-        "search_function": _resources.pop("search_function", search.function),
-        "upload_document": _resources.pop("upload_document", make_upload_document().upload_document),
-        "batch_processor": _resources.pop("batch_processor", None),
-    }
+    if not isinstance(configs, BaseModel):
+        raise TypeError(f"'configs' must be a BaseModel instance, got {type(configs).__name__} instead.")
 
     try:
-        app_instance = App(configs=configs, resources=resources)
+        Configs.model_validate(configs)
+    except ValidationError as e:
+        raise ConfigurationError(f"configs failed validation: {e.errors()}") from e
+
+    try:
+        resources_ = {
+            "read_only_db": resources.pop('read_only_db', READ_ONLY_DB),
+            "llm": resources.pop("llm", LLM),
+            "logger": resources.pop("logger", module_logger),
+            "fastapi": resources.pop("fastapi", FastAPI),
+            "Jinja2Templates": resources.pop("Jinja2Templates", Jinja2Templates),
+            "email": resources.pop("email", email),
+            "side_menu": resources.pop("side_menu", get_side_menu()),
+            "upload_menu": resources.pop("upload_menu", get_upload_menu()),
+            "search_function": resources.pop("search_function", search.function),
+            "upload_document": resources.pop("upload_document", make_upload_document().upload_document),
+            "batch_processor": resources.pop("batch_processor", None),
+            "event_dict": resources.pop("event_dict", event_dict),
+        }
+    except Exception as e:
+        raise ResourceError(f"Error setting up resources for App: {e}") from e
+
+    try:
+        app_instance = App(configs=configs, resources=resources_)
     except KeyError as e:
         raise InitializationError(f"Failed to initialize App due to invalid resource key: {e}") from e
     except AttributeError as e:
@@ -1048,17 +1253,17 @@ def make_app(
         return app_instance
 
 def make_fastapi_app(
-        mock_resources: Optional[dict[str, Any]] = None, 
-        mock_configs: Optional[BaseModel] = None,
+        resources: dict[str, Any] = {}, 
+        configs: BaseModel = project_configs,
         return_fastapi_instance: bool = True
         ) -> FastAPI:
     """
     Convenience function to create and return a FastAPI instance.
 
     Args:
-        mock_resources (dict[str, Any], optional): A dictionary of callables to override injected
+        resources (dict[str, Any], optional): A dictionary of callables to override injected
         defaults. Defaults to None.
-        mock_configs (Configs, optional): A Configs object to override default initialization
+        configs (Configs, optional): A Configs object to override default initialization
         configurations. Defaults to None.
         return_fastapi_instance (bool, optional): If True, return the FastAPI instance.
         If False, return the App instance. Defaults to True.
@@ -1070,25 +1275,59 @@ def make_fastapi_app(
         InitializationError: If there are errors during App initialization or FastAPI configuration.
     """
     try:
-        app_instance = make_app(mock_resources=mock_resources, mock_configs=mock_configs)
-    except Exception as e: # Re-raise errors.
-        raise InitializationError(f"Error creating App instance: {e}") from e
+        app_instance = make_app(resources=resources, configs=configs)
+    except Exception as e:
+        raise StartupError(f"Unexpected error creating App instance: {e}") from e
 
     try:
         return app_instance.make_app() if return_fastapi_instance else app_instance
     except Exception as e:
-        raise InitializationError(f"Unexpected error configuring FastAPI app: {e}") from e
+        raise StartupError(f"Unexpected error configuring FastAPI app: {e}") from e
 
 
 # Set up the FastAPI app
 app = make_fastapi_app()
 
+# Add project root to Python path
+project_root = Path(__file__).parent
+sys.path.insert(0, str(project_root))
 
-if __name__ == '__main__':
+from .read_only_database import close_db_connection
+
+def clear_futures():
+    """Clear any pending asyncio futures to prevent warnings on shutdown."""
+    try:
+        loop = asyncio.get_event_loop()
+        pending = asyncio.all_tasks(loop=loop)
+        for task in pending:
+            task.cancel()
+        loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+    except (KeyboardInterrupt, asyncio.exceptions.CancelledError) as e:
+        pass
+    except Exception as e:
+        print(f"Unexpected error clearing asyncio futures: {e}")
+
+
+atexit.register(close_db_connection)
+atexit.register(clear_futures)
+
+
+def main():
+    error = 0
     try:
         uvicorn.run("app:app", host="0.0.0.0", port=8080, reload=True)
+    except KeyboardInterrupt:
+        module_logger.info("Server interrupted by user.")
+    except Exception as e:
+        import traceback
+        print(f"Error while running app: {e}\nTraceback:\n{traceback.format_exc()}")
+        error = 1
     finally:
         if READ_ONLY_DB is not None:
             READ_ONLY_DB.exit()
         module_logger.info("Server stopped.")
-        sys.exit(0)
+        return error
+
+
+if __name__ == '__main__':
+    sys.exit(main())

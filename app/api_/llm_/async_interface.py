@@ -2,20 +2,101 @@
 Asynchronous API interface for the LLM integration with the American Law dataset.
 Provides access to OpenAI-powered legal research and RAG components with async support.
 """
-import os
+import asyncio
+import json
+import logging
 from pathlib import Path
 import re
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, AsyncGenerator, Optional
 
 
-from pydantic import BaseModel
+from pydantic import ValidationError, BaseModel, Field
 
-
-from logger import logger
-from configs import configs, Configs
+from configs import Configs
 from .dependencies.async_openai_client import AsyncOpenAIClient
-from .embeddings_utils import EmbeddingsManager
+from .embeddings_manager import EmbeddingsManager
 from utils.llm.validate_and_correct_sql_query_string import validate_and_correct_sql_query_string
+from app.errors import LLMError
+
+
+class _ConversationHistory(BaseModel):
+    user_prompt: str = Field(..., min_length=1)
+    system_prompt: str = Field(..., min_length=1)
+    conversation_history: list[dict[str, str]] = Field(..., default_factory=list)
+
+
+def parse_sse_event(raw_text: str) -> Optional[dict]:
+    """
+    Parse a single SSE event from raw text.
+    
+    Args:
+        raw_text: Raw SSE event text containing event type and data
+        
+    Returns:
+        Parsed event data as dictionary, or None if parsing fails
+    """
+    if not raw_text or not raw_text.strip():
+        return None
+
+    lines = raw_text.strip().split('\n')
+    event_type = None
+    event_data = None
+
+    for line in lines:
+        if line.startswith('event:'):
+            event_type = line.split('event:', 1)[1].strip()
+        elif line.startswith('data:'):
+            data_str = line.split('data:', 1)[1].strip()
+            try:
+                event_data = json.loads(data_str)
+            except json.JSONDecodeError as e:
+                return None
+
+    if event_data:
+        return event_data
+    return None
+
+
+def extract_delta(event_data: dict) -> Optional[str]:
+    """
+    Extract text delta from a parsed SSE event.
+    
+    Args:
+        event_data: Parsed event dictionary
+        
+    Returns:
+        Text delta string, or None if not a delta event
+    """
+    if not event_data:
+        return None
+
+    event_type = event_data.get('type')
+
+    if event_type == 'response.output_text.delta':
+        return event_data.get('delta', '')
+
+    return None
+
+
+def extract_complete_text(event_data: dict) -> Optional[str]:
+    """
+    Extract complete text from a done event.
+    
+    Args:
+        event_data: Parsed event dictionary
+        
+    Returns:
+        Complete text string, or None if not a done event
+    """
+    if not event_data:
+        return None
+    
+    event_type = event_data.get('type')
+    
+    if event_type == 'response.output_text.done':
+        return event_data.get('text', '')
+    
+    return None
 
 
 class AsyncLLMInterface:
@@ -24,11 +105,7 @@ class AsyncLLMInterface:
     Provides a simplified async API for accessing embeddings search and RAG functionality.
     """
 
-    def __init__(
-        self,
-        configs: Optional[Configs] = None,
-        resources: Optional[Dict[str, Callable]] = None
-    ):
+    def __init__(self, *, configs: Configs, resources: dict[str, Any]) -> None:
         """
         Initialize the async LLM interface.
         
@@ -37,19 +114,24 @@ class AsyncLLMInterface:
             configs: Configuration object containing all required settings
         """
         self.configs = configs
+        self.resources = resources
+
+        self.logger: logging.Logger = resources["logger"]
 
         self.api_key: str = configs.OPENAI_API_KEY.get_secret_value()
         self.data_path: Path = configs.AMERICAN_LAW_DATA_DIR
         self.db_path: Path = configs.AMERICAN_LAW_DB_PATH
         self.model: str = configs.OPENAI_MODEL
         self.embedding_model: str = configs.OPENAI_EMBEDDING_MODEL
+        self.voice_model: str = configs.OPENAI_VOICE_MODEL
+        self.system_prompt: str = configs.SYSTEM_PROMPT
 
         # Initialize clients
         self.async_client: AsyncOpenAIClient = resources["async_client"]
-        logger.info(f"Initialized AsyncLLMInterface with model: {self.model}")
-    
-        self.embeddings_manager = resources["embeddings_manager"]
-        logger.info(f"Initialized Embeddings Manager with model: {self.embedding_model}")
+
+        self.embeddings_manager: EmbeddingsManager = resources["embeddings_manager"]
+        self.logger.info(f"Initialized Embeddings Manager with model: {self.embedding_model}")
+        self.logger.info(f"Initialized AsyncLLMInterface with model: {self.model}")
 
 
     async def ask_question(
@@ -59,7 +141,7 @@ class AsyncLLMInterface:
         use_embeddings: bool = True,
         document_limit: int = 5,
         custom_system_prompt: str = "You are a legal research assistant specializing in American municipal and county laws."
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Ask a question about American law asynchronously.
         
@@ -73,7 +155,7 @@ class AsyncLLMInterface:
         Returns:
             Dictionary with the generated response and additional information
         """
-        logger.info(f"Processing question: {query}")
+        self.logger.info(f"Processing question: {query}")
         messages = [
             {"role": "system", "content": custom_system_prompt},
             {"role": "user", "content": query}
@@ -101,14 +183,14 @@ class AsyncLLMInterface:
                     "total_tokens": self.async_client.total_tokens
                 })
             except Exception as e:
-                logger.error(f"Error in direct LLM query: {e}")
+                self.logger.error(f"Error in direct LLM query: {e}")
                 response.update({
                     "response": f"Error generating response: {str(e)}",
                     "error": str(e)
                 })
         return response
 
-    async def get_single_embedding(self, text: str) -> List[float]:
+    async def get_single_embedding(self, text: str) -> list[float]:
         """
         Get a single embedding for a given text asynchronously.
         
@@ -118,22 +200,131 @@ class AsyncLLMInterface:
         Returns:
             Embedding vector
         """
-        return await self.async_client.get_embeddings(text)
+        try:
+            return await self.async_client.get_embeddings(text)
+        except Exception as e:
+            raise e
         # if len(embedding_list) > 1:
-        #     logger.warning(f"Multiple embeddings returned for text: '{text}'. Returning first one.")
+        #     self.logger.warning(f"Multiple embeddings returned for text: '{text}'. Returning first one.")
         # return embedding_list[0]
 
-    async def _generic_response(self, message: str = None, system_prompt: str = None) -> str:
+    def _format_messages(
+            self, 
+            system_prompt: str, 
+            user_prompt: str, 
+            conversation_history: list[dict[str, str]] = []
+        ) -> list[dict[str, str]]:
+        """Format messages for LLM input."""
+        if not conversation_history:
+            return [
+                {"role": "system", "content": system_prompt.strip()},
+                {"role": "user", "content": user_prompt.strip()}
+            ]
+        else:
+            messages = [{"role": "system", "content": system_prompt.strip()}]
+            for msg in conversation_history:
+                messages.append({"role": msg["role"], "content": msg["content"].strip()})
+            messages.append({"role": "user", "content": user_prompt.strip()})
+            return messages
+
+
+    async def _generic_response_stream(
+            self, *,
+            system_prompt: str, 
+            user_prompt: str, 
+            conversation_history: list[dict[str, str]] = []
+        ) -> AsyncGenerator[Any, None]:
+        """Stream a generic response from the LLM asynchronously."""
+
+        messages = self._format_messages(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            conversation_history=conversation_history
+        )
+
+        stream = await self.async_client.client.responses.create(
+            model=self.model,
+            input=messages,
+            temperature=0, # Deterministic output
+            stream=True,
+        )
+        self.logger.debug("Started streaming response from LLM")
+        yield stream
+
+    async def _generic_response(
+            self, *, 
+            system_prompt: str, 
+            user_prompt: str, 
+            conversation_history: list[dict[str, str]] = []
+            ) -> Any:
+        """Return a generic response from the LLM asynchronously."""
+
+        messages = self._format_messages(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            conversation_history=conversation_history
+        )
 
         return await self.async_client.client.chat.completions.create(
-            model="gpt4o",
-            messages=[
-                {"role": "system", "content": system_prompt.strip()},
-                {"role": "user", "content": message.strip()}
-            ],
+            model=self.model,
+            messages=messages,
             max_tokens=1024,
             temperature=0 # Deterministic output
         )
+
+    async def stream_response(self, query: str, conversation_history: list[dict[str, str]]) -> AsyncGenerator[str, None]:
+        """
+        Stream LLM response token by token.
+        
+        Args:
+            query: User's current message
+            conversation_history: List of previous messages
+            
+        Yields:
+            str: Individual tokens or chunks of the response
+        
+        Raises:
+            ValueError: If inputs are invalid
+            LLMError: If there is an error generating the response stream
+        """
+        kwargs = {
+            "user_prompt": query,
+            "system_prompt": self.system_prompt,
+            "conversation_history": conversation_history
+        }
+
+        try:
+            _ConversationHistory.model_validate(kwargs)
+        except ValidationError as e:
+            raise ValueError(f"Invalid inputs: {e.errors()}") from e
+
+        try:
+            async for event in self._generic_response_stream(**kwargs):
+
+                # Read the entire response body
+                await event.response.aread()
+                raw_text = event.response.text
+
+                # Parse SSE events from the raw text
+                events = raw_text.strip().split('\n\n')
+                
+                for event_text in events:
+                    if not event_text.strip():
+                        continue
+
+                    # Parse the event
+                    event_data = parse_sse_event(event_text)
+                    if not event_data:
+                        continue
+
+                    # Extract delta text
+                    delta = extract_delta(event_data)
+                    if delta:
+                        asyncio.sleep(0.01)  # Slight delay to simulate streaming
+                        yield delta
+
+        except Exception as e:
+            raise LLMError(f"Error streaming LLM response: {e}") from e
 
 
     async def determine_user_intent(self, message: str) -> str:
@@ -146,16 +337,24 @@ class AsyncLLMInterface:
         Returns:
             Intent type as a string
         """
+        if not isinstance(message, str):
+            self.logger.error(f"Input message must be a string, got {type(message).__name__}")
+            return "OTHER"
+        message = message.strip()
+        if not message:
+            self.logger.error("Input message is empty after stripping")
+            return "OTHER"
+
         # Make sure the response isn't anything nasty.
         response = await self.async_client.client.moderations.create(
             model="omni-moderation-latest",
             input=message,
         )
         if response.results[0].flagged:
-            logger.warning(f"Message flagged by moderation: {message}")
+            self.logger.warning(f"Message flagged by moderation: {message}")
             return "FLAGGED"
  
-        logger.debug(f"Entering Determine Intent")
+        self.logger.debug(f"Entering Determine Intent")
         system_prompt = """
         You are an intent classifier for a legal search system. Your job is to determine what the user wants to do with their query.
         Classify the user's intent into one of these categories:
@@ -178,12 +377,12 @@ class AsyncLLMInterface:
             )
             if response.choices:
                 choice_content = response.choices[0].message.content.strip().lower()
-                logger.debug(f"Determine intent content: '{choice_content}'")
+                self.logger.debug(f"Determine intent content: '{choice_content}'")
 
                 if "```" in choice_content:
                     choice_content = choice_content.split("```")[1].strip()
 
-                logger.debug(f"Determine intent content after stripping: '{choice_content}'")
+                self.logger.debug(f"Determine intent content after stripping: '{choice_content}'")
 
                 # Extract intent from the classifier response
                 if "search" in choice_content:
@@ -197,14 +396,14 @@ class AsyncLLMInterface:
                 else:
                     # Default fallback if the response doesn't match any category.
                     # This includes cases where the model returns a malformed or .
-                    logger.error("Response did not match expected intent categories")
-                    logger.debug(f"Response content: {choice_content}")
+                    self.logger.error("Response did not match expected intent categories")
+                    self.logger.debug(f"Response content: {choice_content}")
                     return "OTHER"  # Default to search as fallback
             else:
-                logger.error("No valid choice in the GPT response")
+                self.logger.error("No valid choice in the GPT response")
                 return "OTHER"  # Default fallback
         except Exception as e:
-            logger.error(f"Error in determine_intent_basic: {e}", exc_info=True)
+            self.logger.error(f"Error in determine_intent_basic: {e}", exc_info=True)
             return "OTHER"  # Fallback in case of exception
 
 
@@ -213,7 +412,7 @@ class AsyncLLMInterface:
         query: str,
         file_id: Optional[str] = None,
         top_k: int = 5
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Search for relevant documents using embeddings asynchronously.
         
@@ -223,10 +422,10 @@ class AsyncLLMInterface:
             top_k: Number of top results to return
             
         Returns:
-            List of relevant documents with similarity scores
+            list of relevant documents with similarity scores
         """
         # Generate embedding for the query
-        query_embedding = await self.async_client.get_single_embedding(query)
+        query_embedding = await self.async_client.get_embeddings(query)
         
         if file_id:
             # Search in a specific file
@@ -256,15 +455,15 @@ class AsyncLLMInterface:
     async def generate_citation_answer(
         self,
         query: str,
-        citation_codes: List[str],
+        citation_codes: list[str],
         system_prompt: Optional[str] = None
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Generate an answer to a question with specific citation references.
         
         Args:
             query: User's question
-            citation_codes: List of citation codes to use as context
+            citation_codes: list of citation codes to use as context
             system_prompt: Custom system prompt
             
         Returns:
@@ -317,7 +516,7 @@ For legal citations, use Bluebook format when available. Be concise but thorough
             }
             
         except Exception as e:
-            logger.error(f"Error generating citation answer: {e}")
+            self.logger.error(f"Error generating citation answer: {e}")
             return {
                 "query": query,
                 "response": f"Error generating response: {str(e)}",
@@ -325,12 +524,12 @@ For legal citations, use Bluebook format when available. Be concise but thorough
                 "model_used": self.async_client.model,
                 "error": str(e)
             }
-    
+
     async def query_to_sql(
         self,
         query: str,
         custom_system_prompt: Optional[str] = None
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Convert a natural language query into a PostgreSQL command for searching the American Law database.
         
@@ -341,7 +540,7 @@ For legal citations, use Bluebook format when available. Be concise but thorough
         Returns:
             Dictionary with the generated SQL query and additional information
         """
-        logger.info(f"Converting query to SQL: {query}")
+        self.logger.info(f"Converting query to SQL: {query}")
         
         # Define available tables and their schema for context
         schema_info = """
@@ -422,14 +621,14 @@ Return ONLY the SQL query without any explanations."""
             
             # Basic validation to ensure it looks like SQL
             if not re.search(r'SELECT|select', sql_query):
-                logger.warning(f"Generated SQL doesn't contain SELECT statement: {sql_query}")
+                self.logger.warning(f"Generated SQL doesn't contain SELECT statement: {sql_query}")
                 sql_query = f"-- Warning: This may not be a valid SQL query\n{sql_query}"
 
             sql_query = await validate_and_correct_sql_query_string(sql_query)
             if sql_query is None:
-                logger.error("SQL query validation failed or returned empty. The LLM probably messed up.")
+                self.logger.error("SQL query validation failed or returned empty. The LLM probably messed up.")
             else:
-                logger.info(f"SQL query validated successfully")
+                self.logger.info(f"SQL query validated successfully")
 
             output_dict = {
                 "original_query": query,
@@ -441,7 +640,7 @@ Return ONLY the SQL query without any explanations."""
             return output_dict
         
         except Exception as e:
-            logger.error(f"Error converting query to SQL: {e}")
+            self.logger.error(f"Error converting query to SQL: {e}")
             return {
                 "original_query": query,
                 "sql_query": f"-- Error generating SQL query: {str(e)}",

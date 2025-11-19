@@ -57,7 +57,7 @@ class TestDependencyResilience(unittest.TestCase):
                 raise Exception("Simulated processing failure")
             return query
 
-        self.mock_resources = {
+        self.resources = {
             "ranking_algorithm": MagicMock(),
             "text_search": MagicMock(),
             "image_search": MagicMock(),
@@ -70,13 +70,13 @@ class TestDependencyResilience(unittest.TestCase):
             "query_parser": MagicMock(),
             "db": MagicMock(),
         }
-        self.mock_configs = MagicMock()
+        self.configs = MagicMock()
         
         # Create SearchEngine instance with mock resources
-        self.search_engine = SearchEngine(resources=self.mock_resources, configs=self.mock_configs)
+        self.search_engine = SearchEngine(resources=self.resources, configs=self.configs)
         
         # Create SearchEngine instance with mock resources
-        self.search_engine = SearchEngine(resources=self.mock_resources, configs=self.mock_configs)
+        self.search_engine = SearchEngine(resources=self.resources, configs=self.configs)
         
         # Set default threshold (configurable)
         self.resilience_threshold = 0.9  # 90%
@@ -276,7 +276,7 @@ class TestDependencyResilienceRecovery(unittest.TestCase):
             return args[0] if args else ""
         
 
-        self.mock_resources = {
+        self.resources = {
             "ranking_algorithm": MagicMock(),
             "text_search": MagicMock(),
             "image_search": MagicMock(),
@@ -290,16 +290,16 @@ class TestDependencyResilienceRecovery(unittest.TestCase):
             "db": MagicMock(),
         }
 
-        self.mock_resources = {
+        self.resources = {
             "db": self.mock_db,
             "some_function": MagicMock(side_effect=processing_with_intermittent_failures),
             "some_other_function": MagicMock(side_effect=processing_with_intermittent_failures),
             "search": MagicMock(side_effect=search_with_intermittent_failures),
         }
-        self.mock_configs = MagicMock()
+        self.configs = MagicMock()
         
         # Create SearchEngine instance with mock resources
-        self.search_engine = SearchEngine(resources=self.mock_resources, configs=self.mock_configs)
+        self.search_engine = SearchEngine(resources=self.resources, configs=self.configs)
     
     def test_recovery_from_database_failure(self):
         """Test recovery from temporary database failures."""

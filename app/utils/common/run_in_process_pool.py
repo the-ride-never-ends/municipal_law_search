@@ -202,5 +202,10 @@ async def async_run_in_process_pool(
                         loop=asyncio.get_event_loop()
                     )
                     futures[async_future] = input
+    except KeyboardInterrupt:
+        logger.warning("Process pool execution interrupted by user.")
+        for fut in futures:
+            fut.cancel()
+        raise
     finally:
         _garbage_collector_pbar_and_remaining_futures(pbar, futures)

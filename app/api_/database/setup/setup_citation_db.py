@@ -7,10 +7,6 @@ import sqlite3
 import duckdb
 
 
-from logger import logger
-from configs import configs, Configs
-
-
 def setup_citation_db(db_path: Path = None, use_duckdb: bool = True) -> sqlite3.Connection | duckdb.DuckDBPyConnection:
     """
     Set up the citation database schema.
@@ -22,6 +18,7 @@ def setup_citation_db(db_path: Path = None, use_duckdb: bool = True) -> sqlite3.
     Returns:
         Database connection object
     """
+    from configs import configs, Configs
     # Use default path if none provided
     db_path = db_path or configs.AMERICAN_LAW_DATA_DIR / "american_law.db"
     

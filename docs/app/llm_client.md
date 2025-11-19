@@ -19,7 +19,7 @@ Provides integration with OpenAI APIs and RAG components for legal research.
 - [`AsyncLLMOutput`](#asyncllmoutput)
 - [`LLMOutput`](#llmoutput)
 - [`OpenAiClient`](#openaiclient)
-- [`AsyncLLMClient`](#asyncllmclient)
+- [`LLMClient`](#asyncllmclient)
 
 ## Functions
 
@@ -104,10 +104,10 @@ def get_embeddings(self, texts)
 def get_response(self, user_message, system_prompt)
 ```
 
-## `AsyncLLMClient`
+## `LLMClient`
 
 ```python
-class AsyncLLMClient(object)
+class LLMClient(object)
 ```
 
 Asynchronous client for LLM API integration with RAG capabilities.

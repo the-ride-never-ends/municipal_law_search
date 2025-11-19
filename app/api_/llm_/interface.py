@@ -5,7 +5,7 @@ Provides access to OpenAI-powered legal research and RAG components.
 import os
 from pathlib import Path
 import re
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional
 
 
 from pydantic import BaseModel
@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from logger import logger
 from configs import configs, Configs
 from .dependencies.openai_client import OpenAIClient, LLMInput, LLMOutput
-from .embeddings_utils import EmbeddingsManager
+from .embeddings_manager import EmbeddingsManager
 
 
 def _validate_and_correct_sql_query_string(sql_query: str, fix_broken_queries: bool = True) -> Optional[str]:

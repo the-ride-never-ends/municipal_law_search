@@ -69,13 +69,13 @@ def _create_mock_configs() -> Mock:
     Returns:
         Mock: Configuration object mock
     """
-    mock_configs = Mock()
-    mock_configs.max_file_size = 50 * 1024 * 1024  # 50MB
-    mock_configs.supported_file_types = ['.pdf', '.doc', '.docx', '.txt']
-    mock_configs.database_url = "sqlite:///test.db"
-    mock_configs.upload_directory = "/tmp/uploads"
-    mock_configs.log_level = "INFO"
-    return mock_configs
+    configs = Mock()
+    configs.max_file_size = 50 * 1024 * 1024  # 50MB
+    configs.supported_file_types = ['.pdf', '.doc', '.docx', '.txt']
+    configs.database_url = "sqlite:///test.db"
+    configs.upload_directory = "/tmp/uploads"
+    configs.log_level = "INFO"
+    return configs
 
 
 def _create_mock_resources() -> Dict[str, Mock]:
@@ -157,7 +157,7 @@ def database_timeout_failure_mock():
 
 
 @pytest.fixture
-def mock_configs():
+def configs():
     """
     Mock configuration object.
     
@@ -168,7 +168,7 @@ def mock_configs():
 
 
 @pytest.fixture
-def mock_resources():
+def resources():
     """
     Mock resources dictionary.
     
@@ -192,13 +192,13 @@ def mock_resources_with_db_failure():
 
 
 @pytest.fixture
-def mock_app_instance(mock_configs, mock_resources):
+def mock_app_instance(configs, resources):
     """
     A mock App instance with mocked dependencies.
     
     Args:
-        mock_configs: Mock configuration from fixture
-        mock_resources: Mock resources from fixture
+        configs: Mock configuration from fixture
+        resources: Mock resources from fixture
         
     Returns:
         Mock: App instance mock with all dependencies
@@ -207,10 +207,10 @@ def mock_app_instance(mock_configs, mock_resources):
     
     # Create mock App instance
     mock_app = Mock()
-    mock_app.configs = mock_configs
-    mock_app.resources = mock_resources
-    mock_app.db = mock_resources['database']
-    mock_app.logger = mock_resources['logger']
+    mock_app.configs = configs
+    mock_app.resources = resources
+    mock_app.db = resources['database']
+    mock_app.logger = resources['logger']
     
     # Mock the upload_document method behavior
     async def mock_upload_document(file, client_cid=None):
@@ -230,19 +230,19 @@ def mock_app_instance(mock_configs, mock_resources):
 
 
 @pytest.fixture
-def mock_app_with_db_failure(mock_configs, mock_resources_with_db_failure):
+def mock_app_with_db_failure(configs, mock_resources_with_db_failure):
     """
     A mock App instance with failing database dependencies.
     
     Args:
-        mock_configs: Mock configuration from fixture
+        configs: Mock configuration from fixture
         mock_resources_with_db_failure: Mock resources with failing DB from fixture
         
     Returns:
         Mock: App instance mock with failing database
     """
     mock_app = Mock()
-    mock_app.configs = mock_configs
+    mock_app.configs = configs
     mock_app.resources = mock_resources_with_db_failure
     mock_app.db = mock_resources_with_db_failure['database']
     mock_app.logger = mock_resources_with_db_failure['logger']

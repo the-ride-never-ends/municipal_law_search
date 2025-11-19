@@ -34,7 +34,7 @@ class TestErrorRate(unittest.TestCase):
         self.mock_db = MagicMock()
         
         # Create mock resources
-        self.mock_resources = {
+        self.resources = {
             "text_search": MagicMock(),
             "image_search": MagicMock(),
             "voice_search": MagicMock(),
@@ -47,10 +47,10 @@ class TestErrorRate(unittest.TestCase):
             "query_parser": MagicMock(),
             "db": MagicMock(),
         }
-        self.mock_configs = MagicMock()
+        self.configs = MagicMock()
         
         # Create SearchEngine instance with mock resources
-        self.search_engine = SearchEngine(resources=self.mock_resources, configs=self.mock_configs)
+        self.search_engine = SearchEngine(resources=self.resources, configs=self.configs)
         
         # Set default threshold (configurable)
         self.error_rate_threshold = 0.01  # 1%
@@ -193,7 +193,7 @@ class TestErrorRateWithInjectedErrors(unittest.TestCase):
                 raise Exception("Simulated search error")
             return [{"result": "search_result"}]
         
-        self.mock_resources = {
+        self.resources = {
             "db": self.mock_db,
             "some_function": MagicMock(),
             "some_other_function": MagicMock(),
@@ -201,7 +201,7 @@ class TestErrorRateWithInjectedErrors(unittest.TestCase):
         }
         
         # Create SearchEngine instance with mock resources
-        self.search_engine = SearchEngine(resources=self.mock_resources)
+        self.search_engine = SearchEngine(resources=self.resources)
         
         # Set default threshold (configurable)
         self.error_rate_threshold = 0.05  # 5%

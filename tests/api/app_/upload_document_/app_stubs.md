@@ -435,7 +435,7 @@ def make_app(self) -> FastAPI:
 ## make_app
 
 ```python
-def make_app(mock_resources: Optional[dict] = None, mock_configs: Optional[BaseModel] = None) -> FastAPI:
+def make_app(resources: Optional[dict] = None, configs: Optional[BaseModel] = None) -> FastAPI:
 ```
 * **Async:** False
 * **Method:** False
@@ -497,7 +497,7 @@ Returns:
 ## get_side_menu
 
 ```python
-def get_side_menu(mock_resources: Optional[dict] = None, mock_configs: Optional[BaseModel] = None) -> SideMenu:
+def get_side_menu(resources: Optional[dict] = None, configs: Optional[BaseModel] = None) -> SideMenu:
 ```
 * **Async:** False
 * **Method:** False
@@ -506,7 +506,7 @@ def get_side_menu(mock_resources: Optional[dict] = None, mock_configs: Optional[
 ## get_upload_menu
 
 ```python
-def get_upload_menu(mock_resources: Optional[dict] = None, mock_configs: Optional[BaseModel] = None) -> UploadMenu:
+def get_upload_menu(resources: Optional[dict] = None, configs: Optional[BaseModel] = None) -> UploadMenu:
 ```
 * **Async:** False
 * **Method:** False

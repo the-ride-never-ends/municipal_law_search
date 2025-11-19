@@ -20,9 +20,7 @@ class EmbeddingsManager:
     Handles loading, processing, and searching embeddings in parquet files.
     """
     
-    def __init__(self, 
-                 configs: Optional[Configs] = None
-                 ):
+    def __init__(self, *, configs: Configs, resources: dict[str, Any]) -> None:
         """
         Initialize the embeddings manager.
         
@@ -31,11 +29,14 @@ class EmbeddingsManager:
                 - data_path: Path to the dataset files
                 - db_path: Path to the SQLite database
         """
-        self.data_path = configs.AMERICAN_LAW_DATA_DIR
-        self.db_path = configs.AMERICAN_LAW_DB_PATH
+        self.configs = configs
+        self.resources = resources
+
+        self.data_path: Path = configs.AMERICAN_LAW_DATA_DIR
+        self.db_path: Path = configs.AMERICAN_LAW_DB_PATH
 
         # Cache for recently used embeddings
-        self._embedding_cache = {}
+        self._embedding_cache: dict[str, list[float]] = {}
         
     def list_embedding_files(self) -> List[str]:
         """
@@ -44,10 +45,10 @@ class EmbeddingsManager:
         Returns:
             List of embedding file paths
         """
-        if not self.data_path or not os.path.exists(self.data_path):
+        if not self.data_path.exists():
             return []
-            
-        embedding_files = list(Path(self.data_path).glob("*_embeddings.parquet"))
+
+        embedding_files = list(self.data_path.glob("*_embeddings.parquet"))
         return [str(file) for file in embedding_files]
 
     def load_embeddings(self, file_id: str) -> pd.DataFrame:
@@ -65,9 +66,9 @@ class EmbeddingsManager:
             return self._embedding_cache[file_id]
             
         # Load embeddings from file
-        embedding_file = os.path.join(self.data_path, f"{file_id}_embeddings.parquet")
+        embedding_file = self.data_path / f"{file_id}_embeddings.parquet"
         
-        if not os.path.exists(embedding_file):
+        if not embedding_file.exists():
             logger.error(f"Embedding file not found: {embedding_file}")
             return pd.DataFrame()
             

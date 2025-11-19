@@ -1,0 +1,227 @@
+Add these styles to your existing CSS or create a new llm-mode.css file
+
+/* LLM Mode Indicator for Input */
+.search-input.llm-mode-active {
+    border: 2px solid #4F46E5;
+    box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+}
+
+.search-input.llm-mode-active::placeholder {
+    color: #4F46E5;
+}
+
+/* LLM Message Container */
+.llm-message {
+    margin-bottom: 1.5rem;
+    padding: 1.5rem;
+    border-radius: 12px;
+    transition: opacity 0.3s ease, transform 0.3s ease;
+    animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* User Message Styling */
+.llm-message.llm-user {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    margin-left: 2rem;
+    box-shadow: 0 4px 6px rgba(102, 126, 234, 0.3);
+}
+
+/* Assistant Message Styling */
+.llm-message.llm-assistant {
+    background: white;
+    border: 2px solid #e5e7eb;
+    margin-right: 2rem;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+/* Message Header */
+.message-header {
+    display: flex;
+    align-items: center;
+    margin-bottom: 0.75rem;
+    font-weight: 600;
+    font-size: 0.875rem;
+}
+
+.message-header i {
+    margin-right: 0.5rem;
+    font-size: 1rem;
+}
+
+.llm-user .message-header {
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.llm-assistant .message-header {
+    color: #4B5563;
+}
+
+.role-label {
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+/* Message Content */
+.message-content {
+    line-height: 1.6;
+    font-size: 1rem;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+.llm-user .message-content {
+    color: white;
+}
+
+.llm-assistant .message-content {
+    color: #1F2937;
+}
+
+/* Typing indicator for streaming */
+.llm-assistant .message-content:empty::after {
+    content: '▋';
+    animation: blink 1s infinite;
+}
+
+@keyframes blink {
+    0%, 49% {
+        opacity: 1;
+    }
+    50%, 100% {
+        opacity: 0;
+    }
+}
+
+/* Toast notification styles for LLM mode */
+.toast.toast-info {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .llm-message.llm-user {
+        margin-left: 1rem;
+    }
+    
+    .llm-message.llm-assistant {
+        margin-right: 1rem;
+    }
+}
+
+/* Smooth scrolling for conversation */
+#results {
+    scroll-behavior: smooth;
+}
+
+/* Clear conversation button (optional) */
+.clear-conversation-btn {
+    position: fixed;
+    bottom: 2rem;
+    right: 2rem;
+    padding: 0.75rem 1.5rem;
+    background: #EF4444;
+    color: white;
+    border: none;
+    border-radius: 9999px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 4px 6px rgba(239, 68, 68, 0.3);
+    transition: all 0.3s ease;
+    z-index: 100;
+}
+
+.clear-conversation-btn:hover {
+    background: #DC2626;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 8px rgba(239, 68, 68, 0.4);
+}
+
+.clear-conversation-btn:active {
+    transform: translateY(0);
+}
+
+/* LLM Mode Badge (optional - can add to show mode is active) */
+.llm-mode-badge {
+    position: fixed;
+    top: 1rem;
+    right: 1rem;
+    padding: 0.5rem 1rem;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-radius: 9999px;
+    font-size: 0.875rem;
+    font-weight: 600;
+    z-index: 1000;
+    box-shadow: 0 4px 6px rgba(102, 126, 234, 0.3);
+    animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        box-shadow: 0 4px 6px rgba(102, 126, 234, 0.3);
+    }
+    50% {
+        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.5);
+    }
+}
+
+/* Code blocks in LLM responses */
+.message-content code {
+    background: rgba(0, 0, 0, 0.05);
+    padding: 0.2rem 0.4rem;
+    border-radius: 4px;
+    font-family: 'Courier New', monospace;
+    font-size: 0.9em;
+}
+
+.llm-user .message-content code {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.message-content pre {
+    background: rgba(0, 0, 0, 0.05);
+    padding: 1rem;
+    border-radius: 8px;
+    overflow-x: auto;
+    margin: 0.5rem 0;
+}
+
+.llm-user .message-content pre {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+/* Links in LLM responses */
+.message-content a {
+    color: #4F46E5;
+    text-decoration: underline;
+}
+
+.llm-user .message-content a {
+    color: rgba(255, 255, 255, 0.9);
+    font-weight: 600;
+}
+
+/* Lists in LLM responses */
+.message-content ul,
+.message-content ol {
+    margin-left: 1.5rem;
+    margin-top: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.message-content li {
+    margin-bottom: 0.25rem;
+}

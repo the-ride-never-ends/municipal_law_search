@@ -10,9 +10,12 @@ from typing import Any, Callable, Dict, List, Never, Optional, Tuple
 
 import duckdb
 
+try:
+    from logger import logger
+except ImportError:
+    import logging
+    logger = logging.getLogger(__name__)
 
-from logger import logger
-from configs import configs
 from .types import DUCKDB_TYPE_DICT
 
 
@@ -114,6 +117,12 @@ class DuckDbDatabase:
     _read_only = False # Default to non read-only mode
     FETCH_METHODS = ['records', 'dict', 'tuple', 'dataframe']
 
+    logger = logger
+
+    def __init__(self) -> None:
+        # Only create an instance to change class attributes like the logger.
+        pass
+
     @property
     def read_only(cls) -> bool:
         """
@@ -142,8 +151,8 @@ class DuckDbDatabase:
             cls._read_only = read_only
             return duckdb.connect(db_path, read_only=cls._read_only)
 
-    @staticmethod
-    def close(conn: duckdb.DuckDBPyConnection) -> None:
+    @classmethod
+    def close(cls, conn: duckdb.DuckDBPyConnection) -> None:
         """
         Close a DuckDB connection.
         
@@ -153,10 +162,11 @@ class DuckDbDatabase:
         try:
             conn.close()
         except Exception as e:
-            logger.warning(f"Error closing DuckDB connection: {e}")
+            cls.logger.warning(f"Error closing DuckDB connection: {e}")
 
-    @staticmethod
+    @classmethod
     def execute(
+        cls,
         conn: duckdb.DuckDBPyConnection, 
         query: str, 
         params: Optional[Tuple | Dict[str, Any]] = None
@@ -179,13 +189,14 @@ class DuckDbDatabase:
             with conn.cursor() as cursor:
                 return cursor.execute(query, params) if params else cursor.execute(query)
         except Exception as e:
-            logger.error(f"Error executing DuckDB query: {e}")
-            logger.debug(f"Query: {query}")
-            logger.debug(f"Params: {params}")
+            cls.logger.error(f"Error executing DuckDB query: {e}")
+            cls.logger.debug(f"Query: {query}")
+            cls.logger.debug(f"Params: {params}")
             raise e
 
-    @staticmethod
+    @classmethod
     def fetch(
+            cls,
             conn: duckdb.DuckDBPyConnection,
             query: str, 
             params: Optional[ Tuple | Dict[str, Any]] = None, 
@@ -212,16 +223,18 @@ class DuckDbDatabase:
                         return cursor.fetchdf().to_dict('records')[0:num_results] # -> list of dicts
 
         except Exception as e:
-            logger.error(f"Error fetching results from DuckDB: {e}")
+            cls.logger.error(f"Error fetching results from DuckDB: {e}")
             raise e
 
 
-    @staticmethod
-    def fetch_all(conn: duckdb.DuckDBPyConnection, 
-                  query: str, 
-                  params: Optional[Tuple | Dict[str, Any]] = None,
-                  return_format: str = 'records'
-                  ) -> Any:
+    @classmethod
+    def fetch_all(
+                cls,
+                conn: duckdb.DuckDBPyConnection, 
+                query: str, 
+                params: Optional[Tuple | Dict[str, Any]] = None,
+                return_format: str = 'records'
+                ) -> Any:
         """
         Fetch all results from a query.
 
@@ -255,11 +268,11 @@ class DuckDbDatabase:
                     case _:
                         return cursor.fetchdf().to_dict('records') # -> list of dicts
         except Exception as e:
-            logger.error(f"Error fetching results from DuckDB: {e}")
+            cls.logger.error(f"Error fetching results from DuckDB: {e}")
             return []
 
-    @staticmethod
-    def begin(conn: duckdb.DuckDBPyConnection) -> None:
+    @classmethod
+    def begin(cls, conn: duckdb.DuckDBPyConnection) -> None:
         """
         Begin a transaction.
         
@@ -272,11 +285,11 @@ class DuckDbDatabase:
         try:
            conn.begin()
         except Exception as e:
-            logger.error(f"Error beginning DuckDB transaction: {e}")
+            cls.logger.error(f"Error beginning DuckDB transaction: {e}")
             raise e
 
-    @staticmethod
-    def commit(conn: duckdb.DuckDBPyConnection) -> None:
+    @classmethod
+    def commit(cls, conn: duckdb.DuckDBPyConnection) -> None:
         """
         Commit the current transaction.
         
@@ -289,11 +302,11 @@ class DuckDbDatabase:
         try:
             conn.commit()
         except Exception as e:
-            logger.error(f"Error committing DuckDB transaction: {e}")
+            cls.logger.error(f"Error committing DuckDB transaction: {e}")
             raise e
 
-    @staticmethod
-    def rollback(conn: duckdb.DuckDBPyConnection) -> None:
+    @classmethod
+    def rollback(cls, conn: duckdb.DuckDBPyConnection) -> None:
         """
         Rollback the current transaction.
         
@@ -306,10 +319,10 @@ class DuckDbDatabase:
         try:
             conn.rollback()
         except Exception as e:
-            logger.error(f"Error rolling back DuckDB transaction: {e}")
+            cls.logger.error(f"Error rolling back DuckDB transaction: {e}")
             raise e
 
-    @staticmethod
+    @classmethod
     def get_cursor(conn: duckdb.DuckDBPyConnection) -> duckdb.DuckDBPyConnection:
         """
         Get a cursor from a DuckDB connection.
@@ -322,8 +335,8 @@ class DuckDbDatabase:
         """
         return conn.cursor()
 
-    @staticmethod
-    def close_cursor(cursor: duckdb.DuckDBPyConnection) -> None:
+    @classmethod
+    def close_cursor(cls, cursor: duckdb.DuckDBPyConnection) -> None:
         """
         Close a cursor.
         
@@ -333,10 +346,10 @@ class DuckDbDatabase:
         try:
             cursor.close()
         except Exception as e:
-            logger.warning(f"Error closing DuckDB cursor: {e}")
+            cls.logger.warning(f"Error closing DuckDB cursor: {e}")
             raise e
 
-    @staticmethod
+    @classmethod
     def get_session(conn: duckdb.DuckDBPyConnection) -> Never:
         """
         Get a session from a DuckDB connection.
@@ -352,8 +365,8 @@ class DuckDbDatabase:
         """
         raise NotImplementedError("DuckDB does not support sessions. Use the connection directly.")
 
-    @staticmethod
-    def close_session(conn: duckdb.DuckDBPyConnection) -> Never:
+    @classmethod
+    def close_session(cls, conn: duckdb.DuckDBPyConnection) -> Never:
         """
         Close a session in DuckDB.
         
@@ -365,14 +378,16 @@ class DuckDbDatabase:
         """
         raise NotImplementedError("DuckDB does not support sessions. Close the connection directly.")
 
-    @staticmethod
-    def create_function(conn: duckdb.DuckDBPyConnection, 
-                        name: str, 
-                        function: Callable, 
-                        argument_types: Optional[List[str]] = [], 
-                        return_type: Optional[Any] = None,
-                        side_effects: Optional[bool] = False
-                        ) -> None:
+    @classmethod
+    def create_function(
+                    cls,
+                    conn: duckdb.DuckDBPyConnection, 
+                    name: str, 
+                    function: Callable, 
+                    argument_types: Optional[List[str]] = [], 
+                    return_type: Optional[Any] = None,
+                    side_effects: Optional[bool] = False
+                    ) -> None:
         """
         Register a Python function with DuckDB.
         If argument types and return type are not provided, they will be inferred from the function's type hints.
@@ -405,11 +420,12 @@ class DuckDbDatabase:
                 return_type=return_type, side_effects=side_effects
             )
         except Exception as e:
-            logger.error(f"Error registering function with DuckDB: {e}")
+            cls.logger.error(f"Error registering function with DuckDB: {e}")
             raise
 
-    @staticmethod
+    @classmethod
     def create_table_if_not_exists(
+                                cls,
                                 conn: duckdb.DuckDBPyConnection, 
                                 table_name: str, 
                                 columns: List[Dict[str, str]], 
@@ -443,11 +459,12 @@ class DuckDbDatabase:
             """
             conn.execute(create_table_sql)
         except Exception as e:
-            logger.error(f"Error creating table {table_name}: {e}")
+            cls.logger.error(f"Error creating table {table_name}: {e}")
             raise
 
-    @staticmethod
+    @classmethod
     def create_index_if_not_exists(
+                                cls,
                                 conn: duckdb.DuckDBPyConnection, 
                                 table_name: str, 
                                 index_name: str, 
@@ -476,5 +493,5 @@ class DuckDbDatabase:
             """
             conn.execute(create_index_sql)
         except Exception as e:
-            logger.error(f"Error creating index {index_name} on {table_name}: {e}")
+            cls.logger.error(f"Error creating index {index_name} on {table_name}: {e}")
             raise

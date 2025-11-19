@@ -37,11 +37,11 @@ class TestQueryVolumeHandling(unittest.TestCase):
         # Create mock database
         self.mock_db = MagicMock()
 
-        self.mock_configs = MagicMock()
+        self.configs = MagicMock()
         
         
         # Create mock resources
-        self.mock_resources = {
+        self.resources = {
             "db": self.mock_db,
             "some_function": MagicMock(),
             "some_other_function": MagicMock(),
@@ -49,7 +49,7 @@ class TestQueryVolumeHandling(unittest.TestCase):
         }
         
         # Create SearchEngine instance with mock resources
-        self.search_engine = SearchEngine(resources=self.mock_resources, configs=self.mock_configs)
+        self.search_engine = SearchEngine(resources=self.resources, configs=self.configs)
         
         # Set default values (configurable)
         self.design_query_volume = 100  # QPS
@@ -157,7 +157,7 @@ class TestQueryVolumeIntegration(unittest.TestCase):
             return [{"result": "search_result"}]
         
         # TODO Update with real names of functions once SearchEngine is implemented
-        self.mock_resources = {
+        self.resources = {
             "text_search": MagicMock(),
             "image_search": MagicMock(),
             "voice_search": MagicMock(),
@@ -170,10 +170,10 @@ class TestQueryVolumeIntegration(unittest.TestCase):
             "query_parser": MagicMock(),
             "db": MagicMock(),
         }
-        self.mock_configs = MagicMock()
+        self.configs = MagicMock()
         
         # Create SearchEngine instance with mock resources
-        self.search_engine = SearchEngine(resources=self.mock_resources, configs=self.mock_configs)
+        self.search_engine = SearchEngine(resources=self.resources, configs=self.configs)
         
         # Reset query count
         self.query_count = 0

@@ -389,26 +389,26 @@ startxref
         """Create App instance mock."""
         from app.configs import configs
 
-        mock_resources = {
+        resources = {
             "llm": AsyncMock(spec_set=AsyncLLMInterface),
             "logger": MagicMock(spec=logging.Logger),
             "db": AsyncMock(spec=Database),
         }
 
-        mock_app = make_app(mock_resources=mock_resources, mock_configs=configs)
+        mock_app = make_app(resources=resources, configs=configs)
 
         return mock_app
 
     @staticmethod
     def _create_configs_mock(config: Dict) -> Mock:
         """Create configuration mock."""
-        mock_configs = Mock()
-        mock_configs.max_file_size = config['max_file_size']
-        mock_configs.supported_file_types = config['supported_file_types']
-        mock_configs.database_url = config['database_url']
-        mock_configs.upload_directory = config['upload_directory']
-        mock_configs.log_level = config['log_level']
-        return mock_configs
+        configs = Mock()
+        configs.max_file_size = config['max_file_size']
+        configs.supported_file_types = config['supported_file_types']
+        configs.database_url = config['database_url']
+        configs.upload_directory = config['upload_directory']
+        configs.log_level = config['log_level']
+        return configs
 
     @classmethod
     def _create_resources_mock(cls, config: Dict, should_fail: bool, failure_type: str) -> Mock:

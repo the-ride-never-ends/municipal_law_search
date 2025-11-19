@@ -81,12 +81,12 @@ class TestAsyncFunctions{{ module_info.module_name }}(IsolatedAsyncioTestCase):
     def setUp(self):
         """Set up test class"""
         {% if module_info.configs %}
-        self.mock_configs = MagicMock(wraps={{ module_info.configs }})
+        self.configs = MagicMock(wraps={{ module_info.configs }})
         {% endif %}
 
         {% if module_info.resources %}
         {% raw %}
-        self.mock_resources = {
+        self.resources = {
         {% endraw %}
             {% for resource_name, resource_callable in module_info.resources.items() %}
             "{{ resource_name }}": MagicMock(wraps={{ resource_callable }}),

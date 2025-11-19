@@ -6,7 +6,7 @@ import asyncio
 import os
 from pathlib import Path
 import sqlite3
-from typing import Annotated, Any, Callable, Coroutine, Dict, List, Literal, Never, Optional
+from typing import Annotated as Ann, Any, Callable, Coroutine, Dict, List, Optional
 
 
 import duckdb
@@ -194,8 +194,6 @@ class LLMOutput(BaseModel):
     def response(self) -> Any:
         return self.response_parser(self.response)
 
-from api_.database.dependencies.duckdb import DuckDbClient
-
 
 
 
@@ -240,24 +238,89 @@ class OpenAiClient:
         # Extract the embedding vectors from the response
         return [data.embedding for data in response.data]
 
-    def get_embeddings(self, texts: List[str]) -> List[List[float]]:
-        response = self.client.embeddings.create(
-            input=texts,
-            model=self.embedding_model
-        )
+    def get_embeddings(self, texts: str | List[str]) -> List[List[float]]:
+        """
+        Generate embeddings for a list of text inputs using OpenAI's embedding model.
+        
+        Args:
+            texts: List of text strings to generate embeddings for
+            
+        Returns:
+            List of embedding vectors (one vector per input text)
+            
+        Raises:
+            OpenAIError: If the API request fails
+            
+        Examples:
+            >>> texts = ["Hello world", "Legal document text"]
+            >>> embeddings = client.get_embeddings(texts)
+            >>> len(embeddings)  # doctest: +SKIP
+            2
+        """
+        match texts:
+            case str():
+                texts = texts.strip()
+                if not texts:
+                    raise ValueError("Input text string cannot be empty.")
+                texts = [texts]
+            case list():
+                _texts = []
+                for idx, text in enumerate(texts):
+                    if not isinstance(text, str):
+                        raise TypeError(f"All items in the input list must be strings. Item at index {idx} is of type {type(text).__name__}.")
+                    text = text.strip()
+                    if not text:
+                        raise ValueError(f"Input text at index {idx} cannot be an empty string.")
+                    _texts.append(text)
+                texts = _texts
+            case _:
+                raise TypeError(f"Input texts must be a string or a list of strings, got {type(texts).__name__}.")
+
+        try:
+            response = self.client.embeddings.create(
+                input=texts,
+                model=self.embedding_model
+            )
+        except Exception as e:
+            logger.error(f"{type(e)} generating embeddings: {e}")
         # Extract the embedding vectors from the response
         return [data.embedding for data in response.data]
+
 
     async def async_get_response(self,
                             user_message: str = None,
                             system_prompt: str = None,
-                            *,
                             return_raw_response: bool = False,
                             model: Optional[str] = None,
                             temperature: Optional[float] = None,
                             max_tokens: Optional[int] = None,
-                            ) -> str:
+                            ) -> str | Any:
         """
+        Asynchronously generate a response using OpenAI's chat completion API.
+        
+        Args:
+            user_message: The user's input message/query
+            system_prompt: The system prompt to guide the AI's behavior
+            return_raw_response: If True, return the raw OpenAI response object
+            model: Override the default model for this request
+            temperature: Override the default temperature for this request
+            max_tokens: Override the default max_tokens for this request
+
+        Returns:
+            The AI-generated response as a string, or the raw response object if requested.
+            If an error occurs, returns an error message string.
+
+        Examples:
+            >>> response = await async_get_response(
+            ...     user_message="What is the capital of France?",
+            ...     system_prompt="You are a knowledgeable assistant.",
+            ...     return_raw_response=False,
+            ...     model="gpt-4o",
+            ...     temperature=0.5,
+            ...     max_tokens=150
+            ... )
+            >>> print(response)  # doctest: +SKIP
+            'The capital of France is Paris.'
         """
         try:
             _response = await self.async_client.chat.completions.create(
@@ -310,7 +373,7 @@ class OpenAiClient:
             return "No response generated. Please try again."
 
 
-class AsyncLLMClient:
+class LLMClient:
     """
     Asynchronous client for LLM API integration with RAG capabilities.
     Handles embeddings integration and semantic search against the law database.
@@ -360,7 +423,7 @@ class AsyncLLMClient:
         self.data_path: Path = configs.AMERICAN_LAW_DATA_DIR
         self.db_path: Path = configs.AMERICAN_LAW_DB_PATH
 
-        logger.info(f"Initialized AsyncLLMClient client")
+        logger.info(f"Initialized LLMClient client")
 
 
     async def get_embeddings(self, texts: List[str]) -> List[List[float]]:

@@ -608,7 +608,7 @@ class SearchFunction:
             await self.figure_out_what_the_user_wants(self.search_query)
         except Exception as e:
             # If the user intent is not a search, we tell the user to try again.
-            # TODO Implement this
+            # TODO Implement determination of other intents like "conversation" or "command".
             self.logger.error(f"Error determining user intent: {e}")
 
         sql_query = await self.turn_english_into_sql(page, per_page)
@@ -624,8 +624,8 @@ class SearchFunction:
                     search_response = self.format_search_response(cumulative_results, page, per_page)
                     yield search_response
 
-        # NOTE we call close_cursor_and_connection because duckdb only allows concurrency for read-only connections.
-        # TODO Create separate database for intermediate cached results.
+        # NOTE: we call close_cursor_and_connection because duckdb only allows concurrency for read-only connections.
+        # TODO: Create separate database for intermediate cached results.
         self.close_cursor_and_connection()
 
         self.sort_and_save_search_query_results()

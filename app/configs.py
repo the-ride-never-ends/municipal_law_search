@@ -6,7 +6,6 @@ import logging
 from unittest.mock import MagicMock, AsyncMock
 
 
-import torch
 from pydantic import (
     BaseModel, 
     computed_field, 
@@ -36,6 +35,10 @@ def _USE_GPU_FOR_COSINE_SIMILARITY() -> str:
     Returns:
         str: "cuda" if GPU is available, "cpu" otherwise.
     """
+    try:
+        import torch
+    except ImportError:
+        return "cpu"
     return "cuda" if torch.cuda.is_available() else "cpu"
 
 
@@ -106,6 +109,8 @@ class Configs(BaseModel):
     OPENAI_MODEL:                     str = "gpt-4o"
     OPENAI_SMALL_MODEL:               str = "gpt-5-nano"
     OPENAI_EMBEDDING_MODEL:           str = "text-embedding-3-small"
+    OPENAI_VOICE_MODEL:               str = "gpt-4o-mini-transcribe"
+    SYSTEM_PROMPT:                    str = "You are a helpful legal research assistant specializing in American municipal and county laws."
     LOG_LEVEL:                        Literal[10, 20, 30, 40, 50] = logging.DEBUG
     SIMILARITY_SCORE_THRESHOLD:       float = 0.4
     SEARCH_EMBEDDING_BATCH_SIZE:      int = 10000
@@ -117,7 +122,6 @@ class Configs(BaseModel):
     MAX_FILE_SIZE_BYTES:              int = 52428800  # 50MB
     SUPPORTED_FILE_TYPES:             set[str] = {"txt", "pdf", "docx", "doc"}
 
-
     @computed_field # type: ignore[prop-decorator]
     @property
     def USE_GPU_FOR_COSINE_SIMILARITY(self) -> str:
@@ -125,7 +129,7 @@ class Configs(BaseModel):
         Determines if GPU is available for cosine similarity calculations.
 
         Returns:
-            bool: True if GPU is available, False otherwise.
+            str: "cuda" if GPU is available, "cpu" otherwise.
         """
         return _USE_GPU_FOR_COSINE_SIMILARITY()
 
@@ -177,81 +181,53 @@ class Configs(BaseModel):
         return getattr(self, key, default)
 
 
-def set_mock_configs(configs: Configs, mock_configs: dict[str, Any]) -> None:
-    """
-    Sets multiple configuration attributes on a Configs instance.
-
-    This function updates the attributes of a Configs object based on the
-    provided dictionary of configuration overrides. It validates each attribute
-    after setting it.
-
-    Args:
-        configs (Configs): The Configs instance to update.
-        mock_configs (dict[str, Any]): A dictionary of configuration overrides.
-
-    Raises:
-        AttributeError: If an attribute in mock_configs does not exist in Configs.
-        ValidationError: If setting an attribute fails validation.
-    """
-    unittest_mock_attributes = get_unittest_mock_attributes()
-    for attr, value in mock_configs.items():
-        if (
-            not attr.startswith('_') and 
-            attr not in unittest_mock_attributes and
-            hasattr(configs, attr)
-        ):
-            try:
-                setattr(configs, attr, value)
-                # Re-validate the new value
-                configs.model_validate()
-            except ValidationError as e:
-                raise ValidationError(f"Validation error setting '{attr}' to '{value}': {e.errors()}")
-            except AttributeError as e:
-                raise KeyError(f"Configuration key '{attr}' not found.") from e
-        else:
-            raise AttributeError(f"Unexpected config attribute in mock_configs: {attr}")
+def _validate_configs(config_dict: dict[str, Any]) -> None:
+    try:
+        configs = Configs.model_validate(config_dict)
+    except ValidationError as e:
+        raise ValueError(
+            f"Validation error in configs: {e.errors()}"
+        ) from e
+    except Exception as e: # Stop everything if we get bad configs
+        raise RuntimeError(f"Unexpected error validating configs: {e}") from e
     return configs
 
 
-def make_configs(mock_configs: Optional[dict[str, Any]] = None) -> Configs:
+def make_configs(configs: Optional[dict[str, Any]] = None) -> Configs:
     """
     Factory function to create a Configs instance.
 
-    This function initializes a Configs object with the provided dictionary
-    of configuration overrides. It is intended to be used for creating
-    configuration instances as needed.
-
     Args:
-        mock_configs (dict[str, Any], optional): A dictionary of configuration overrides. Defaults to None.
+        configs (dict[str, Any], optional): A dictionary of configuration overrides. Defaults to None.
     
     Returns:
         Configs: A new instance of the Configs pydantic model.
+    
+    Raises:
+        FileNotFoundError: If the configuration file is not found.
+        ValueError: If there is an error parsing the configuration file.
+        RuntimeError: If there is an unexpected error loading or validating the configuration.
     """
+    if configs is not None:
+        return _validate_configs(configs)
+
     # Load the configs from the yaml and create an instance of the Configs class
     try:
         with open(_ROOT_DIR / 'app' / "configs.yaml", "r") as config_file:
             config_dict = yaml.safe_load(config_file)
     except FileNotFoundError as e:
-        raise FileNotFoundError("Configuration file 'configs.yaml' not found.") from e
+        raise FileNotFoundError(f"Configuration file 'configs.yaml' not found: {e}") from e
     except yaml.YAMLError as e:
-        raise ValueError("Error parsing the configuration file 'configs.yaml'.") from e
+        raise ValueError(f"Error parsing the configuration file 'configs.yaml': {e}") from e
     except Exception as e: # Stop everything if we get bad configs
         raise RuntimeError(f"Unexpected error loading configuration: {e}") from e
 
     try:
-        configs = Configs.model_validate(config_dict)
-    except ValidationError as e:
-        raise ValidationError(
-            f"Validation error in configs: {e.errors()}"
-        ) from e
-    except Exception as e: # Stop everything if we get bad configs
-        raise RuntimeError(f"Unexpected error validating configuration: {e}") from e
-
-    if mock_configs is not None:
-        configs = set_mock_configs(configs, mock_configs)
-    return configs
+        return _validate_configs(config_dict)
+    except Exception as e:
+        raise e
 
 try:
     configs = CONFIGS = make_configs()
 except Exception as e:
-    raise AssertionError(f"Failed to initialize configurations: {e}") from e
+    raise AssertionError(f"FATAL ERROR: Failed to initialize configurations: {e}") from e

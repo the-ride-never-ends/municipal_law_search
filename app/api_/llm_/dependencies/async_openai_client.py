@@ -3,7 +3,7 @@ OpenAI Client implementation for American Law database.
 Provides integration with OpenAI APIs and RAG components for legal research.
 """
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, AsyncGenerator, Callable, Dict, List, Optional
 
 
 import duckdb
@@ -268,6 +268,7 @@ class AsyncOpenAIClient:
         small_model: str = "gpt-5-nano",
         embedding_model: str = "text-embedding-3-small",
         embedding_dimensions: int = 1536,
+        transcription_model: str = "gpt-4o-mini-transcribe",
         temperature: float = 0.2,
         max_tokens: int = 4096,
         configs: Optional[Configs] = None
@@ -297,6 +298,7 @@ class AsyncOpenAIClient:
         self.embedding_dimensions: int = embedding_dimensions
         self.temperature:          float = temperature
         self.max_tokens:           int = max_tokens
+        self.transcription_model:  str = transcription_model
         
         # Start the async client
         self.client:               AsyncOpenAI = AsyncOpenAI(api_key=self.api_key)
@@ -308,6 +310,7 @@ class AsyncOpenAIClient:
         self._latest_response = None
 
         logger.info(f"Initialized AsyncOpenAI client: LLM model: {model}, embedding model: {embedding_model}")
+
 
     @property
     def total_tokens(self) -> int:

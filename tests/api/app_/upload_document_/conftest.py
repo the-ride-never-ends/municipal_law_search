@@ -25,7 +25,7 @@ from reportlab.lib.pagesizes import letter as ReportLabLetter
 
 
 
-from app.configs import configs as real_configs, Configs, set_mock_configs
+
 from app.llm import AsyncLLMInterface
 from app.app import App, make_app
 from app.read_only_database import Database, make_read_only_db
@@ -265,7 +265,7 @@ def make_async_mock(spec=None):
 
 @pytest.fixture
 def mock_app_resources():
-    mock_resources = {
+    resources = {
         "read_only_db": make_magic_mock(Database),
         "llm": make_async_mock(AsyncLLMInterface),
         "logger": make_magic_mock(logging.Logger),
@@ -277,21 +277,23 @@ def mock_app_resources():
         "search_function": make_async_mock(),
         "batch_processor": make_async_mock(),
     }
-    return mock_resources
+    return resources
 
 @pytest.fixture
-def mock_configs():
+def configs():
     """A Configs object with default values."""
+    from app.configs import configs as real_configs, Configs
+    configs = make_magic_mock(Configs)
     mock_config_values = dict()
     configs_copy = real_configs.model_copy()
-    return set_mock_configs(configs_copy, mock_config_values)
+    return 
 
 @pytest.fixture
-def mock_parameters(mock_app_resources, mock_configs):
+def mock_parameters(mock_app_resources, configs):
     """A dictionary of mock parameters for testing."""
     return {
-        'mock_configs': mock_configs,
-        'mock_resources': mock_app_resources
+        'configs': configs,
+        'resources': mock_app_resources
     }
 
 @pytest.fixture
@@ -300,14 +302,14 @@ def mock_app_instance(mock_parameters):
     app = make_app(**mock_parameters)
     return app
 
-def make_mock_app(mock_resources = None, mock_configs: dict = None):
+def make_mock_app(resources = None, configs: dict = None):
     @pytest.fixture
     def _make_mock_app(mock_parameters):
         mock_parameters_copy = mock_parameters.copy()
-        if mock_resources is not None:
-            mock_parameters_copy['resources'].update(mock_resources)
-        if mock_configs is not None:
-            mock_parameters_copy['configs'].update(mock_configs)
+        if resources is not None:
+            mock_parameters_copy['resources'].update(resources)
+        if configs is not None:
+            mock_parameters_copy['configs'].update(configs)
         try:
             app_instance = make_app(**mock_parameters_copy)
         except Exception as e:
@@ -340,10 +342,10 @@ def mock_resources_with_db_failure(mock_conmock_resources):
 
 
 @pytest.fixture
-def mock_app_with_db_failure(mock_configs, mock_resources_with_db_failure):
+def mock_app_with_db_failure(configs, mock_resources_with_db_failure):
     """A mock App instance with failing database dependencies."""
     return Factory.create_mock('app', {
-        'configs': mock_configs,
+        'configs': configs,
         'resources': mock_resources_with_db_failure
     }, should_fail=True, failure_type='database')
 
@@ -1366,5 +1368,5 @@ def concurrent_test_matrix():
             files = Factory.create_multiple_files(1, file_type, identical_content=False)
             mixed_files.extend(files)
         matrix.append(('mixed_types', level, mixed_files[:level]))
-    
+
     return matrix

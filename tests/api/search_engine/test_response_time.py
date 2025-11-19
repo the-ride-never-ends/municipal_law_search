@@ -40,7 +40,7 @@ class TestResponseTime(unittest.TestCase):
         
         # Create mock resources
         # TODO update these mocks to reflect actual search engine operations
-        self.mock_resources = {
+        self.resources = {
             "db": self.mock_db,
             "text_search": MagicMock(),
             "image_search": MagicMock(),
@@ -56,7 +56,7 @@ class TestResponseTime(unittest.TestCase):
         self.configs = MagicMock()
         
         # Create SearchEngine instance with mock resources
-        self.search_engine = SearchEngine(resources=self.mock_resources, configs=self.configs)
+        self.search_engine = SearchEngine(resources=self.resources, configs=self.configs)
         
         # Set default threshold (configurable)
         self.response_time_threshold = 500  # ms
@@ -212,7 +212,7 @@ class TestResponseTimeIntegration(unittest.TestCase):
             time.sleep(0.1)  # 100ms delay
             return [{"result": "search_result"}]
         
-        self.mock_resources = {
+        self.resources = {
             "db": self.mock_db,
             "some_function": MagicMock(side_effect=delayed_processing),
             "some_other_function": MagicMock(side_effect=delayed_processing),
@@ -223,7 +223,7 @@ class TestResponseTimeIntegration(unittest.TestCase):
         }
         
         # Create SearchEngine instance with mock resources
-        self.search_engine = SearchEngine(resources=self.mock_resources)
+        self.search_engine = SearchEngine(resources=self.resources)
         
         # Set default threshold (configurable)
         self.response_time_threshold = 500  # ms

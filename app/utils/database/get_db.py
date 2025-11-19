@@ -29,18 +29,18 @@ def _get_db(db_path: str, use_duckdb: bool = True, read_only: bool = True) -> sq
         return conn
 
 # Database connections
-def get_citation_db(read_only: bool = True, use_duckdb: bool = True):
+def get_citation_db(read_only: bool = True, use_duckdb: bool = True) -> sqlite3.Connection | duckdb.DuckDBPyConnection:
     """Get connection to citation database."""
     return _get_db(_AMERICAN_LAW_DB_PATH, use_duckdb, read_only)
 
-def get_html_db(read_only: bool = True, use_duckdb: bool = True):
+def get_html_db(read_only: bool = True, use_duckdb: bool = True) -> sqlite3.Connection | duckdb.DuckDBPyConnection:
     """Get connection to HTML database."""
     return _get_db(_AMERICAN_LAW_DB_PATH, use_duckdb, read_only)
 
-def get_embeddings_db(read_only: bool = True, use_duckdb: bool = True):
+def get_embeddings_db(read_only: bool = True, use_duckdb: bool = True) -> sqlite3.Connection | duckdb.DuckDBPyConnection:
     """Get connection to embeddings database."""
     return _get_db(_AMERICAN_LAW_DB_PATH, use_duckdb, read_only)
 
-def get_american_law_db(read_only: bool = True, use_duckdb: bool = True):
+def get_american_law_db(read_only: bool = True, use_duckdb: bool = True) -> sqlite3.Connection | duckdb.DuckDBPyConnection:
     """Get connection to citation database."""
     return _get_db(_AMERICAN_LAW_DB_PATH, use_duckdb, read_only)

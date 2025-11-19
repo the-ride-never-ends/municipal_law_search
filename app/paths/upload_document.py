@@ -28,8 +28,8 @@ from pathlib import Path
 from pydantic import BaseModel
 
 
-from app.utils.common.get_cid import get_cid
-from app.configs import Configs
+from utils.common.get_cid import get_cid
+from configs import Configs
 
 
 CID_PATTERN = re.compile(r'^bafkreiht[a-z0-9]{52}$')
@@ -277,9 +277,7 @@ class UploadDocument:
                             )
                     case _:
                         raise ValueError(f"Unsupported file type for text extraction: {ext}")
-            except HTTPException:
-                raise
-            except ValueError:
+            except (HTTPException, ValueError) as e:
                 raise
             except Exception as e:
                 raise RuntimeError(f"Unexpected error determining file mimetype: {e}") from e
@@ -330,17 +328,8 @@ class UploadDocument:
                 }
             )
 
-        except HTTPException as e:
+        except (HTTPException, TypeError, ValueError, IOError) as e:
             # Re-raise HTTP exceptions as-is
-            raise
-        except TypeError as e:
-            # Re-raise type errors for parameter validation
-            raise
-        except ValueError as e:
-            # Re-raise value errors for validation
-            raise
-        except IOError as e:
-            # Re-raise IO errors
             raise
         except Exception as e:
             # Catch any other unexpected errors
@@ -352,8 +341,8 @@ class UploadDocument:
 
 def make_upload_document():
     """Factory function to create UploadDocument instance with default resources and configs."""
-    from app.configs import configs
-    from app.logger import logger
+    from configs import configs
+    from logger import logger
 
     resources = {
         "logger": logger,
